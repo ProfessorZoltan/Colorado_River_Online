@@ -890,44 +890,111 @@ function SharedBoardPanel({ sharedBoard, playerOrder, players }) {
 // PHASE CONTROLS
 // ───────────────────────────────────────────────────────────────────────────────
 
-function PhaseControls({ phase, endPlayerTurn, advanceToNextPhase }) {
+/**
+ * PhaseControls
+ *
+ * Action phases  (action_n / action_c):
+ *   Shows "End Turn" for the active player.
+ *   Other players see a dimmed "Waiting…" indicator.
+ *
+ * Water phase:
+ *   Shows "Advance" but disabled while a water_allocation pendingEffect
+ *   is unresolved — forces players to allocate cubes first.
+ *
+ * Event phase:
+ *   Shows "Advance" but disabled while a protest_activation_round
+ *   pendingEffect is unresolved.
+ *
+ * Income / Cleanup:
+ *   Shows "Advance" always enabled — engine auto-resolves these.
+ */
+function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, endPlayerTurn, advanceToNextPhase }) {
   const inActionPhase = isActionPhase(phase);
+  const isYourTurn    = activePlayer?.id === viewingPlayer?.id;
 
-  const btnStyle = (color = "var(--terra)") => ({
+  // Block Advance if there are effects that require player decisions first
+  const BLOCKING_EFFECT_TYPES = new Set([
+    'water_allocation',
+    'protest_activation_round',
+    'choice_required',
+  ]);
+  const hasBlockingEffect = pendingEffects.some(e => BLOCKING_EFFECT_TYPES.has(e.type));
+
+  // ── Shared style builders ────────────────────────────────────────────────
+  const btn = (color, disabled = false) => ({
     background: "none",
-    border: `1px solid ${color}`,
+    border: `1px solid ${disabled ? "var(--b2)" : color}`,
     borderRadius: 2,
-    color,
+    color: disabled ? "var(--t4)" : color,
     fontFamily: "'Courier Prime', 'Courier New', monospace",
     fontSize: 10,
     letterSpacing: "0.12em",
     padding: "5px 14px",
-    cursor: "pointer",
+    cursor: disabled ? "not-allowed" : "pointer",
     textTransform: "uppercase",
     transition: "all 0.15s",
     whiteSpace: "nowrap",
+    opacity: disabled ? 0.5 : 1,
   });
 
+  // ── Action phase: End Turn ───────────────────────────────────────────────
   if (inActionPhase) {
+    if (!isYourTurn) {
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 6, height: 6, borderRadius: 1, background: "var(--t4)",
+              animation: "pulsedot 1.6s ease-in-out infinite" }} />
+          <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)",
+              letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {activePlayer?.name}’s turn
+          </span>
+        </div>
+      );
+    }
+
     return (
-      <button
-        style={btnStyle("var(--terra)")}
-        onClick={endPlayerTurn}
-        onMouseEnter={e => { e.target.style.background = "var(--terra)"; e.target.style.color = "#fff"; }}
-        onMouseLeave={e => { e.target.style.background = "none";        e.target.style.color = "var(--terra)"; }}>
-        End Turn →
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", letterSpacing: "0.08em" }}>
+          Your turn
+        </span>
+        <button
+          style={btn("var(--terra)")}
+          onClick={endPlayerTurn}
+          onMouseEnter={e => { e.currentTarget.style.background = "var(--terra)"; e.currentTarget.style.color = "#fff"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--terra)"; }}>
+          End Turn →
+        </button>
+      </div>
     );
   }
 
+  // ── Non-action phases: Advance ───────────────────────────────────────────
+  const advanceBlocked = hasBlockingEffect;
+  const blockReason = advanceBlocked
+    ? (pendingEffects.find(e => e.type === 'water_allocation')
+        ? "Allocate water before advancing"
+        : pendingEffects.find(e => e.type === 'protest_activation_round')
+          ? "Resolve protest before advancing"
+          : "Resolve pending effects before advancing")
+    : null;
+
   return (
-    <button
-      style={btnStyle("var(--gold)")}
-      onClick={advanceToNextPhase}
-      onMouseEnter={e => { e.target.style.background = "var(--gold)11"; e.target.style.borderColor = "var(--gold)"; }}
-      onMouseLeave={e => { e.target.style.background = "none";          e.target.style.borderColor = "var(--gold)"; }}>
-      Advance →
-    </button>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {advanceBlocked && (
+        <span className="f-mono" style={{ fontSize: 9, color: "var(--terra-dim)",
+            letterSpacing: "0.08em", maxWidth: 180, textAlign: "right", lineHeight: 1.3 }}>
+          {blockReason}
+        </span>
+      )}
+      <button
+        disabled={advanceBlocked}
+        style={btn("var(--gold)", advanceBlocked)}
+        onClick={advanceBlocked ? undefined : advanceToNextPhase}
+        onMouseEnter={e => { if (!advanceBlocked) { e.currentTarget.style.background = "#c8a55011"; }}}
+        onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
+        Advance →
+      </button>
+    </div>
   );
 }
 
@@ -1057,6 +1124,9 @@ export default function GameTable() {
       <PhaseBar state={state} activePlayer={activePlayer}>
         <PhaseControls
           phase={state.phase}
+          activePlayer={activePlayer}
+          viewingPlayer={viewedPlayer}
+          pendingEffects={pendingEffects}
           endPlayerTurn={handleEndTurn}
           advanceToNextPhase={handleAdvancePhase}
         />
