@@ -1,0 +1,150 @@
+{
+  "_schema_version": 2,
+  "_description": "Shared game board elements visible to and affecting all players. Distinct from player_board.json (per-faction) and cards.json (card definitions).",
+
+  "lawyer_market": {
+    "_description": "4 face-up Lawyer cards available for acquisition, backed by a face-down replenishment deck. When a card is acquired, the gap is filled from the top of the deck.",
+
+    "face_up_slots": 4,
+    "replenishment": "slide_and_draw",
+
+    "setup": {
+      "step_1": { "action": "shuffle_deck",   "rule": "Shuffle all 8 Lawyer cards into a face-down deck." },
+      "step_2": { "action": "deal_face_up",   "rule": "Draw 4 cards from the top of the deck and place them face-up to fill the market slots." }
+    },
+
+    "on_acquisition": [
+      { "step": 1, "action": "remove_card",    "description": "Player takes the acquired card from its face-up slot." },
+      { "step": 2, "action": "slide_and_draw", "description": "If the replenishment deck has cards remaining, draw the top card and place it face-up to fill the vacancy." },
+      { "step": 3, "action": "empty_if_none",  "description": "If the deck is empty, the slot remains empty for the rest of the game." }
+    ],
+
+    "acquisition_cost": {
+      "standard": { "resource": "money", "amount": 4, "_note": "Standard fee is the printed card cost PLUS an additional $4." },
+      "threshold_discount": { "resource": "money", "amount": 0, "condition": "pr_track at −7 or +8", "_note": "At PR thresholds −7 or +8, player pays only the printed card cost — the additional $4 is waived. See player_board.json tracks.pr.threshold_markers." }
+    }
+  },
+
+  "activist_market": {
+    "_description": "4 face-up Activist cards available for acquisition, backed by a face-down replenishment deck. Same sliding market pattern as the Lawyer market.",
+
+    "face_up_slots": 4,
+    "replenishment": "slide_and_draw",
+
+    "setup": {
+      "step_1": { "action": "shuffle_deck", "rule": "Shuffle all 4 Activist cards into a face-down deck." },
+      "step_2": { "action": "deal_face_up", "rule": "Draw all 4 cards and place them face-up. With only 4 cards total, the market starts full and the replenishment deck is empty." }
+    },
+
+    "on_acquisition": [
+      { "step": 1, "action": "remove_card",    "description": "Player takes the acquired card from its face-up slot." },
+      { "step": 2, "action": "slide_and_draw", "description": "Draw the top card from the replenishment deck (if any) to fill the vacancy." },
+      { "step": 3, "action": "empty_if_none",  "description": "If the deck is empty (likely after the first acquisition), the slot remains empty." }
+    ]
+  },
+
+  "strategy_deck": {
+    "_description": "Face-down deck of Strategy cards. No face-up market — cards are dealt to players at setup and drawn individually during play.",
+
+    "total_cards": 8,
+    "orientation": "face_down",
+
+    "setup": {
+      "step_1": { "action": "shuffle_deck", "rule": "Shuffle all 8 Strategy cards into a face-down deck." },
+      "step_2": { "action": "deal_to_players", "rule": "Deal 3 cards to each player. Remaining cards stay face-down as the draw pile." }
+    },
+
+    "on_draw": {
+      "description": "When a player draws a Strategy card (e.g. via Activist D or Sneaky Pete), take the top card from this deck."
+    },
+
+    "discard": {
+      "description": "Strategy cards are discarded after use into a separate discard pile. When the draw pile is exhausted, the discard pile is reshuffled to form a new draw deck."
+    }
+  },
+
+  "event_deck": {
+    "_description": "The shared Event card draw pile and active slot. Always 9 cards, always used in full regardless of player count. Cards cycle — after resolution a card returns to the bottom of the deck.",
+
+    "total_cards": 9,
+    "composition": [
+      { "card_id": "supreme_court_session", "copies": 4 },
+      { "card_id": "severe_drought",        "copies": 2 },
+      { "card_id": "protest_a",             "copies": 1 },
+      { "card_id": "protest_b",             "copies": 1 },
+      { "card_id": "large_snow_melt",       "copies": 1 }
+    ],
+
+    "setup": {
+      "action": "shuffle_and_place",
+      "rule": "Shuffle all 9 event cards and place face-down as the draw pile. No filtering — the full deck is always used."
+    },
+
+    "zones": {
+      "draw_pile": {
+        "orientation": "face_down",
+        "description": "The remaining unresolved event cards. Players cannot look at these."
+      },
+      "active_slot": {
+        "orientation": "face_up",
+        "capacity": 1,
+        "description": "The currently revealed event card. Resolved immediately when flipped."
+      }
+    },
+
+    "on_reveal": [
+      { "step": 1, "action": "flip_top_card",  "description": "Take the top card from the draw pile and place it face-up in the active slot." },
+      { "step": 2, "action": "resolve_effect",  "description": "Immediately resolve the card's effect (protest phase, drought, snow melt, or SC session)." },
+      { "step": 3, "action": "return_to_bottom","description": "Place the resolved card face-down at the bottom of the draw pile. The deck cycles indefinitely." }
+    ]
+  },
+
+  "docket": {
+    "_description": "The Supreme Court case queue. An ordered array of SC case IDs for the active factions only. All cases are face-up and visible to all players at all times. Size is determined at setup and fixed for the game.",
+
+    "structure": "ordered_queue",
+    "face_up": "all",
+    "active_index": 0,
+    "shift_direction": "left",
+
+    "size_by_player_count": {
+      "_description": "C(n, 2) — all unique pairings of active factions.",
+      "2": 1,
+      "3": 3,
+      "4": 6,
+      "5": 10,
+      "6": 15
+    },
+
+    "setup": {
+      "step_1": {
+        "action": "filter_cases",
+        "rule": "Keep only SC case cards where BOTH plaintiff.id AND defendant.id are in the active faction set.",
+        "disposition_of_removed": "Out of the game entirely — not shuffled in, not set aside."
+      },
+      "step_2": {
+        "action": "shuffle_and_place",
+        "rule": "Shuffle the remaining cases and place them all face-up in the docket. All cases are visible from turn 1. Docket size is now fixed for the remainder of the game."
+      }
+    },
+
+    "on_resolution": [
+      { "step": 1, "action": "remove_active",  "description": "Remove the case at index 0. Winner/loser determined, rewards and penalties applied." },
+      { "step": 2, "action": "shift_left",      "description": "All remaining cases shift forward: index 1 becomes the new active case at index 0, index 2 becomes index 1, and so on." },
+      { "step": 3, "action": "append_resolved", "description": "The just-resolved case is placed at the end of the array. It remains face-up. No reveal step needed — all cases are already visible." }
+    ],
+
+    "mutations": [
+      {
+        "trigger": "reorder_sc_cases",
+        "source_card": "donate_to_sc_justice",
+        "description": "The player chooses any two cases currently in the docket array and swaps their positions. Both are face-up (all cases always are).",
+        "operation": "array_swap",
+        "constraints": [
+          "Cannot swap a case that has already been resolved this round.",
+          "The active case at index 0 may be swapped."
+        ]
+      }
+    ]
+  }
+}

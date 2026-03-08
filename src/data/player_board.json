@@ -1,0 +1,342 @@
+{
+  "_schema_version": 2,
+  "_description": "Player board template shared by all 6 factions. Only starting_values differ per faction.",
+  "board_template": {
+    "tracks": {
+      "water_claim": {
+        "resource_id": "water_claim_track",
+        "min": 3,
+        "max": 22,
+        "hard_cap": false,
+        "vp_milestones": [
+          {
+            "at": 6,
+            "vp": 1
+          },
+          {
+            "at": 11,
+            "vp": 2
+          },
+          {
+            "at": 17,
+            "vp": 3
+          },
+          {
+            "at": 22,
+            "vp": 5
+          }
+        ],
+        "threshold_markers": []
+      },
+      "money": {
+        "resource_id": "money",
+        "min": 0,
+        "max": 19,
+        "hard_cap": false,
+        "vp_milestones": [
+          {
+            "at": 19,
+            "vp": 5
+          }
+        ],
+        "threshold_markers": []
+      },
+      "pr": {
+        "resource_id": "pr",
+        "min": -8,
+        "max": 11,
+        "hard_cap": true,
+        "vp_milestones": [
+          {
+            "at": 6,
+            "vp": 2
+          },
+          {
+            "at": 11,
+            "vp": 5
+          }
+        ],
+        "threshold_markers": [
+          {
+            "at": -7,
+            "icon": "scales_of_justice",
+            "effect": "free_lawyer_acquisition",
+            "description": "When the player's PR token reaches this space, they may acquire a Lawyer card by paying only the cost printed on the card, without the usual additional $4 fee."
+          },
+          {
+            "at": 8,
+            "icon": "scales_of_justice",
+            "effect": "free_lawyer_acquisition",
+            "description": "When the player's PR token reaches this space, they may acquire a Lawyer card by paying only the cost printed on the card, without the usual additional $4 fee."
+          }
+        ]
+      }
+    },
+    "citizen_projects": [
+      {
+        "id": "farm",
+        "project_type": "farm",
+        "icon": "agriculture",
+        "water_slots": 6,
+        "citizen_type": "farmer",
+        "fully_watered_reward": [
+          {
+            "resource": "pr",
+            "amount": 4
+          },
+          {
+            "resource": "citizen_card",
+            "citizen_type": "farmer",
+            "amount": 1,
+            "description": "Gain a Farmer citizen card."
+          }
+        ]
+      },
+      {
+        "id": "housing",
+        "project_type": "housing",
+        "icon": "neighborhood",
+        "water_slots": 4,
+        "citizen_type": "service_worker",
+        "fully_watered_reward": [
+          {
+            "resource": "pr",
+            "amount": 2
+          },
+          {
+            "resource": "citizen_card",
+            "citizen_type": "service_worker",
+            "amount": 1,
+            "description": "Gain a Service Worker citizen card."
+          }
+        ]
+      },
+      {
+        "id": "firefighting",
+        "project_type": "firefighting",
+        "icon": "firefighter",
+        "water_slots": 2,
+        "citizen_type": "firefighter",
+        "fully_watered_reward": [
+          {
+            "resource": "pr",
+            "amount": 1
+          },
+          {
+            "resource": "citizen_card",
+            "citizen_type": "firefighter",
+            "amount": 1,
+            "description": "Gain a Firefighter citizen card."
+          }
+        ]
+      }
+    ],
+    "income_projects": [
+      {
+        "id": "factory",
+        "project_type": "factory",
+        "icon": "factory",
+        "water_slots": 6,
+        "fully_watered_reward": [
+          {
+            "resource": "money",
+            "amount": 5
+          },
+          {
+            "resource": "pr",
+            "amount": -3
+          }
+        ]
+      },
+      {
+        "id": "vineyard",
+        "project_type": "vineyard",
+        "icon": "grapes",
+        "water_slots": 4,
+        "fully_watered_reward": [
+          {
+            "resource": "money",
+            "amount": 3
+          },
+          {
+            "resource": "pr",
+            "amount": -2
+          }
+        ]
+      },
+      {
+        "id": "recreation",
+        "project_type": "recreation",
+        "icon": "golf_flag",
+        "water_slots": 2,
+        "fully_watered_reward": [
+          {
+            "resource": "money",
+            "amount": 1
+          },
+          {
+            "resource": "pr",
+            "amount": -1
+          }
+        ]
+      }
+    ],
+    "partnerships": [
+      {
+        "id": "law_firm",
+        "icon": "scales_of_justice",
+        "buy_cost": {
+          "resource": "money",
+          "amount": 4
+        },
+        "ability": {
+          "repeatable": true,
+          "cost": {
+            "resource": "money",
+            "amount": 4
+          },
+          "effect": "acquire_card",
+          "card_type": "lawyer_card",
+          "amount": 1,
+          "description": "Pay $4: Acquire 1 Lawyer card. May be used any number of times per round."
+        }
+      },
+      {
+        "id": "business",
+        "icon": "handshake",
+        "buy_cost": {
+          "resource": "money",
+          "amount": 3
+        },
+        "ability": {
+          "repeatable": true,
+          "cost": {
+            "resource": "money",
+            "amount": 3
+          },
+          "effect": "acquire_card",
+          "card_type": "activist_card",
+          "amount": 1,
+          "description": "Pay $3: Acquire 1 Activist card. May be used any number of times per round."
+        }
+      },
+      {
+        "id": "investment",
+        "icon": "upward_trend",
+        "buy_cost": {
+          "resource": "money",
+          "amount": 2
+        },
+        "ability": {
+          "repeatable": true,
+          "cost": {
+            "resource": "money",
+            "amount": 2
+          },
+          "effect": "gain_resource",
+          "resource": "pr",
+          "amount": 1,
+          "description": "Pay $2: Gain 1 PR. May be used any number of times per round."
+        }
+      }
+    ],
+    "water_bank": {
+      "unlock_cost": {
+        "resource": "money",
+        "amount": 8
+      },
+      "unlocked_once": true,
+      "capacity": 9,
+      "description": "A player pays $8 once to unlock their Water Bank for the rest of the game. Any player, on their turn, may pay the bank owner $1 per water cube to store cubes in the bank (marked in the owner's player color). The owner may retrieve any or all of their stored water for free on any future turn, including in a later round.",
+      "mechanics": {
+        "unlock": {
+          "cost": {
+            "resource": "money",
+            "amount": 8
+          },
+          "effect": "water_bank_becomes_active",
+          "duration": "permanent"
+        },
+        "deposit": {
+          "actor": "any_player",
+          "cost_per_cube": {
+            "resource": "money",
+            "amount": 1
+          },
+          "cost_recipient": "bank_owner",
+          "effect": "store_water_cube_in_bank",
+          "cube_color": "owner_player_color"
+        },
+        "withdraw": {
+          "actor": "bank_owner",
+          "cost": null,
+          "effect": "retrieve_stored_water_cubes",
+          "amount": "any",
+          "timing": "any future turn, any round"
+        }
+      }
+    }
+  },
+  "factions": [
+    {
+      "id": "arizona",
+      "name": "Arizona",
+      "faction_type": "state",
+      "starting_values": {
+        "water_claim_track": 4,
+        "money_track": 3,
+        "pr_track": 2
+      }
+    },
+    {
+      "id": "california",
+      "name": "California",
+      "faction_type": "state",
+      "starting_values": {
+        "water_claim_track": 5,
+        "money_track": 3,
+        "pr_track": 0
+      }
+    },
+    {
+      "id": "nevada",
+      "name": "Nevada",
+      "faction_type": "state",
+      "starting_values": {
+        "water_claim_track": 3,
+        "money_track": 4,
+        "pr_track": 1
+      }
+    },
+    {
+      "id": "chemehuevi",
+      "name": "Chemehuevi",
+      "faction_type": "reservation",
+      "starting_values": {
+        "water_claim_track": 3,
+        "money_track": 2,
+        "pr_track": 4
+      }
+    },
+    {
+      "id": "fort_mohave",
+      "name": "Fort Mohave",
+      "faction_type": "reservation",
+      "starting_values": {
+        "water_claim_track": 3,
+        "money_track": 3,
+        "pr_track": 3
+      }
+    },
+    {
+      "id": "quechan",
+      "name": "Quechan",
+      "faction_type": "reservation",
+      "starting_values": {
+        "water_claim_track": 3,
+        "money_track": 2,
+        "pr_track": 5
+      }
+    }
+  ]
+}

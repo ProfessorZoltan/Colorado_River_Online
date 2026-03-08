@@ -1,0 +1,1548 @@
+[
+  {
+    "id": "activist_a",
+    "type": "activist",
+    "name": "Activist A",
+    "vp": 0,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Activist_A.png",
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "icon": "water_claim",
+        "text": "Gain or Lose 1 water claim cube",
+        "project_type": null,
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "icon": "protest_influence",
+        "text": "+1 protestor influence",
+        "project_type": null,
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      }
+    },
+    "passive": null
+  },
+  {
+    "id": "activist_b",
+    "type": "activist",
+    "name": "Activist B",
+    "vp": 1,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Activist_B.png",
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "icon": null,
+        "text": "Add 1 Protest card to the Event deck.",
+        "project_type": null,
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "icon": "protest_influence",
+        "text": "+2 protestor influence",
+        "project_type": null,
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      }
+    },
+    "passive": null
+  },
+  {
+    "id": "activist_c",
+    "type": "activist",
+    "name": "Activist C",
+    "vp": 1,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Activist_C.png",
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": "exhaust",
+        "icon": null,
+        "text": "Look at 2 Strategy cards. Draw 1 and put the other 1 on the bottom of the deck.",
+        "project_type": null,
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      }
+    },
+    "passive": null
+  },
+  {
+    "id": "activist_d",
+    "type": "activist",
+    "name": "Activist D",
+    "vp": 0,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Activist_D.png",
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "icon": null,
+        "text": "Gain 1 Strategy Card",
+        "project_type": null,
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "icon": "protest_influence",
+        "text": "+1 protestor influence",
+        "project_type": null,
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      }
+    },
+    "passive": null
+  },
+  {
+    "id": "farmer_a",
+    "type": "citizen",
+    "name": "Farmer A",
+    "vp": 4,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Farmer_A.png",
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "icon": "pr",
+        "project_type": null,
+        "text": "Gain 1 PR",
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "icon": null,
+        "project_type": "farm",
+        "text": "Your fully watered farms produce 2 extra VP this round",
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      }
+    },
+    "passive": null
+  },
+  {
+    "id": "service_worker_a",
+    "type": "citizen",
+    "name": "Service Worker A",
+    "vp": 2,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": {
+      "operator": "lte",
+      "field": "pr",
+      "value": 4
+    },
+    "art": "Service_Worker_A.png",
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "icon": "money",
+        "project_type": null,
+        "text": "Gain $1",
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "icon": null,
+        "project_type": "income",
+        "text": "One fully watered income project receives twice the bonus this round",
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      }
+    },
+    "passive": null
+  },
+  {
+    "id": "service_worker_b",
+    "type": "citizen",
+    "name": "Service Worker B",
+    "vp": 1,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": {
+      "operator": "lte",
+      "field": "pr",
+      "value": 0
+    },
+    "art": "Service_Worker_B.png",
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "icon": "pr",
+        "project_type": null,
+        "text": "Gain 1 PR",
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "icon": null,
+        "project_type": null,
+        "text": "Add a protest card to the Event deck, if there are any left",
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      }
+    },
+    "passive": null
+  },
+  {
+    "id": "firefighter_a",
+    "type": "citizen",
+    "name": "Firefighter A",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Firefighter_A.png",
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": "exhaust",
+        "icon": null,
+        "project_type": "firefighting",
+        "text": "Receive 1 VP per Firefighter in your tableau instead of receiving the usual bonus for a fully watered firefighting project",
+        "payment": null,
+        "dice": null,
+        "penalty": null
+      }
+    },
+    "passive": null
+  },
+  {
+    "id": "sneaky_pete",
+    "type": "lawyer",
+    "name": "Sneaky Pete",
+    "vp": null,
+    "cost": 3,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "08_sneakypete.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "payment": [
+          {
+            "resource": "water_claim",
+            "amount": 1
+          }
+        ],
+        "icon": "money",
+        "project_type": null,
+        "text": "Pay 1 water claim cube to gain $3",
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "payment": null,
+        "icon": null,
+        "project_type": null,
+        "text": "Draw 1 Strategy card",
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "anti_environmentalist",
+    "type": "lawyer",
+    "name": "Anti-Environmentalist",
+    "vp": null,
+    "cost": 5,
+    "pr_requirement": {
+      "operator": "lte",
+      "value": 1
+    },
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_200759.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "payment": [
+          {
+            "resource": "pr",
+            "amount": 1
+          }
+        ],
+        "icon": "sc_influence",
+        "project_type": null,
+        "text": "Lose 1 PR & gain 1 SC influence",
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "payment": [
+          {
+            "resource": "pr",
+            "amount": 1
+          }
+        ],
+        "icon": "sc_influence",
+        "project_type": null,
+        "text": "Lose 1 PR to gain 2 SC influence in an active case",
+        "alternatives": [
+          {
+            "cost": null,
+            "payment": null,
+            "icon": "money",
+            "project_type": null,
+            "text": "Gain $2",
+            "dice": null,
+            "penalty": null
+          }
+        ],
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "pro_bono_attorney",
+    "type": "lawyer",
+    "name": "Pro Bono Attorney",
+    "vp": null,
+    "cost": 0,
+    "pr_requirement": {
+      "operator": "gte",
+      "value": 6
+    },
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_200815.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "payment": null,
+        "icon": "water_claim_track",
+        "project_type": null,
+        "text": "Gain 1 level on the water claim track",
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "payment": null,
+        "icon": "sc_influence",
+        "project_type": null,
+        "text": "Gain 1 SC influence in an active case",
+        "alternatives": [
+          {
+            "cost": null,
+            "payment": null,
+            "icon": null,
+            "project_type": null,
+            "text": "Gain 1 VP",
+            "dice": null,
+            "penalty": null
+          }
+        ],
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "its_a_job_lawyer",
+    "type": "lawyer",
+    "name": "The \"It's a Job\" Lawyer",
+    "vp": null,
+    "cost": 2,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_200828.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "payment": [
+          {
+            "resource": "money",
+            "amount": 2
+          }
+        ],
+        "icon": "water_claim",
+        "project_type": null,
+        "text": "Pay $2 to gain 1 water claim",
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "payment": [
+          {
+            "resource": "money",
+            "amount": 1
+          }
+        ],
+        "icon": "sc_influence",
+        "project_type": null,
+        "text": "Pay $1 to gain 1 SC influence in an active case",
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "team_player",
+    "type": "lawyer",
+    "name": "Team Player",
+    "vp": null,
+    "cost": 3,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_200842.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": "exhaust",
+        "payment": [
+          {
+            "resource": "money",
+            "amount": 1
+          }
+        ],
+        "icon": "water",
+        "project_type": null,
+        "text": "Pay $1 to gain 1 water cube",
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": "exhaust",
+        "payment": null,
+        "icon": null,
+        "project_type": null,
+        "text": "A lawyer you acquire this round costs $3 less",
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "workaholic",
+    "type": "lawyer",
+    "name": "Workaholic",
+    "vp": null,
+    "cost": 1,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_200855.png",
+    "passive": null,
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": "exhaust",
+        "payment": null,
+        "icon": "water",
+        "project_type": null,
+        "text": "Gain 2 water cubes instead of 1 when you would gain 1",
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "rider_of_coattails",
+    "type": "lawyer",
+    "name": "Rider of Coat-tails",
+    "vp": null,
+    "cost": 1,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_200912.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": null,
+        "payment": null,
+        "icon": null,
+        "project_type": null,
+        "text": "Gain the bonus of any of your lawyers activated this phase, if they cost more than this lawyer",
+        "dice": null,
+        "penalty": null
+      },
+      "C": {
+        "cost": null,
+        "payment": null,
+        "icon": null,
+        "project_type": null,
+        "text": "Gain the bonus of any court case won this round, if you were not involved in it",
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "in_it_for_glory",
+    "type": "lawyer",
+    "name": "In it for Glory",
+    "vp": null,
+    "cost": 2,
+    "pr_requirement": {
+      "operator": "lte",
+      "value": 7
+    },
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_200924.png",
+    "passive": {
+      "trigger": "on_win_sc_case",
+      "text": "Gain 1 VP each time you win a SC case"
+    },
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": "exhaust",
+        "payment": null,
+        "icon": "sc_influence",
+        "project_type": null,
+        "text": "Gain 1 SC influence in an active case",
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "deal_with_federal_government",
+    "type": "strategy",
+    "name": "Deal with Federal Government",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_201722.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": null,
+        "payment": [
+          {
+            "resource": "water_claim",
+            "amount": 1
+          }
+        ],
+        "icon": "money",
+        "project_type": null,
+        "text": "Lose 1 water claim: Gain $3",
+        "dice": null,
+        "penalty": null
+      },
+      "C": null
+    }
+  },
+  {
+    "id": "quid_pro_quo",
+    "type": "strategy",
+    "name": "Quid Pro Quo",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_201744.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": null,
+        "payment": [
+          {
+            "resource": "money",
+            "amount": 4
+          }
+        ],
+        "icon": "water",
+        "project_type": null,
+        "text": "Pay $4: Gain 2 water cubes",
+        "dice": null,
+        "penalty": null
+      },
+      "C": null
+    }
+  },
+  {
+    "id": "lobby_federal_government",
+    "type": "strategy",
+    "name": "Lobby Federal Government",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_201757.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": null,
+        "payment": [
+          {
+            "resource": "money",
+            "amount": 3
+          }
+        ],
+        "icon": "water_claim",
+        "project_type": null,
+        "text": "Pay $3: Gain 1 water claim",
+        "dice": null,
+        "penalty": null
+      },
+      "C": null
+    }
+  },
+  {
+    "id": "scorched_earth_negotiating",
+    "type": "strategy",
+    "name": "Scorched Earth Negotiating",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_201811.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": null,
+        "payment": [
+          {
+            "resource": "money",
+            "amount": 2
+          },
+          {
+            "resource": "pr",
+            "amount": 1
+          }
+        ],
+        "icon": "water",
+        "project_type": null,
+        "text": "Pay $2 and lose 1 PR: All opponents lose 1 water cube",
+        "dice": null,
+        "penalty": null
+      },
+      "C": null
+    }
+  },
+  {
+    "id": "water_bribe",
+    "type": "strategy",
+    "name": "Water Bribe",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_201825.png",
+    "passive": null,
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": null,
+        "payment": [
+          {
+            "resource": "water",
+            "amount": 1
+          }
+        ],
+        "icon": "money",
+        "project_type": null,
+        "text": "Give 1 water cube to an opponent: they must give you $3",
+        "dice": null,
+        "penalty": null
+      }
+    }
+  },
+  {
+    "id": "red_herring_case",
+    "type": "strategy",
+    "name": "Red Herring Case",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_201837.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": null,
+        "payment": null,
+        "icon": null,
+        "project_type": null,
+        "text": "Choose any 2 lawyers. They cannot be used this round.",
+        "dice": null,
+        "penalty": null
+      },
+      "C": null
+    }
+  },
+  {
+    "id": "donate_to_sc_justice",
+    "type": "strategy",
+    "name": "Donate to Supreme Court Justice",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_201850.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": null,
+        "payment": null,
+        "icon": null,
+        "project_type": null,
+        "text": "Switch the order of any two upcoming SC cards.",
+        "dice": null,
+        "penalty": null
+      },
+      "C": null
+    }
+  },
+  {
+    "id": "protect_our_interests",
+    "type": "strategy",
+    "name": "Protect our Interests",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_201907.png",
+    "passive": null,
+    "actions": {
+      "N": {
+        "cost": null,
+        "payment": null,
+        "icon": null,
+        "project_type": null,
+        "text": "Negate the effect(s) of any 1 card played or any 1 lawyer card used.",
+        "dice": null,
+        "penalty": null
+      },
+      "C": null
+    }
+  },
+  {
+    "id": "protest_a",
+    "type": "event",
+    "name": "Protest A",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "protestA.png",
+    "passive": null,
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": null,
+        "payment": null,
+        "dice": null,
+        "icon": "protest_influence",
+        "project_type": null,
+        "penalty": [
+          {
+            "resource": "pr",
+            "amount": 3
+          }
+        ],
+        "text": "All players activate activists if they choose to. Player(s) with lowest protestor influence lose 3 PR."
+      }
+    }
+  },
+  {
+    "id": "protest_b",
+    "type": "event",
+    "name": "Protest B",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "protestB.png",
+    "passive": null,
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": null,
+        "payment": null,
+        "dice": null,
+        "icon": "protest_influence",
+        "project_type": null,
+        "penalty": [
+          {
+            "resource": "pr",
+            "amount": 1
+          },
+          {
+            "resource": "water_claim",
+            "amount": 1
+          }
+        ],
+        "text": "All players activate activists if they choose to. Player(s) with lowest protestor influence lose 1 PR & 1 water claim."
+      }
+    }
+  },
+  {
+    "id": "severe_drought",
+    "type": "event",
+    "name": "Severe Drought",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_202001.png",
+    "passive": null,
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": null,
+        "payment": null,
+        "dice": {
+          "die": "d6",
+          "operation": "subtract",
+          "target": "water_supply"
+        },
+        "icon": "water",
+        "project_type": null,
+        "penalty": null,
+        "text": "Roll 1 d6 during water determination. Subtract that many blue cubes."
+      }
+    }
+  },
+  {
+    "id": "large_snow_melt",
+    "type": "event",
+    "name": "Large Snow Melt",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_202057.png",
+    "passive": null,
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": null,
+        "payment": null,
+        "dice": {
+          "die": "d6",
+          "operation": "add",
+          "target": "water_supply"
+        },
+        "icon": "water",
+        "project_type": null,
+        "penalty": null,
+        "text": "Roll 1 d6 during water determination. Add that many blue cubes."
+      }
+    }
+  },
+  {
+    "id": "supreme_court_session",
+    "type": "event",
+    "name": "Supreme Court Session",
+    "vp": null,
+    "cost": null,
+    "pr_requirement": null,
+    "discard_condition": null,
+    "art": "Screenshot_2023-09-11_202107.png",
+    "passive": null,
+    "actions": {
+      "N": null,
+      "C": {
+        "cost": null,
+        "payment": null,
+        "dice": null,
+        "icon": "sc_influence",
+        "project_type": null,
+        "penalty": null,
+        "text": "Resolve the Supreme Court case that is in the docket, then move it to the last SC case location."
+      }
+    }
+  },
+  {
+    "id": "arizona_v_california",
+    "type": "sc_case",
+    "name": "Arizona v. California",
+    "plaintiff": {
+      "id": "arizona",
+      "name": "Arizona",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "california",
+      "name": "California",
+      "faction_type": "state"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "arizona_v_nevada",
+    "type": "sc_case",
+    "name": "Arizona v. Nevada",
+    "plaintiff": {
+      "id": "arizona",
+      "name": "Arizona",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "nevada",
+      "name": "Nevada",
+      "faction_type": "state"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "arizona_v_quechan",
+    "type": "sc_case",
+    "name": "Arizona v. Quechan",
+    "plaintiff": {
+      "id": "arizona",
+      "name": "Arizona",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "quechan",
+      "name": "Quechan",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "arizona_v_chemehuevi",
+    "type": "sc_case",
+    "name": "Arizona v. Chemehuevi",
+    "plaintiff": {
+      "id": "arizona",
+      "name": "Arizona",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "chemehuevi",
+      "name": "Chemehuevi",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "arizona_v_fort_mohave",
+    "type": "sc_case",
+    "name": "Arizona v. Fort Mohave",
+    "plaintiff": {
+      "id": "arizona",
+      "name": "Arizona",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "fort_mohave",
+      "name": "Fort Mohave",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "california_v_nevada",
+    "type": "sc_case",
+    "name": "California v. Nevada",
+    "plaintiff": {
+      "id": "california",
+      "name": "California",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "nevada",
+      "name": "Nevada",
+      "faction_type": "state"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "california_v_quechan",
+    "type": "sc_case",
+    "name": "California v. Quechan",
+    "plaintiff": {
+      "id": "california",
+      "name": "California",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "quechan",
+      "name": "Quechan",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "california_v_chemehuevi",
+    "type": "sc_case",
+    "name": "California v. Chemehuevi",
+    "plaintiff": {
+      "id": "california",
+      "name": "California",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "chemehuevi",
+      "name": "Chemehuevi",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "california_v_fort_mohave",
+    "type": "sc_case",
+    "name": "California v. Fort Mohave",
+    "plaintiff": {
+      "id": "california",
+      "name": "California",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "fort_mohave",
+      "name": "Fort Mohave",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "nevada_v_quechan",
+    "type": "sc_case",
+    "name": "Nevada v. Quechan",
+    "plaintiff": {
+      "id": "nevada",
+      "name": "Nevada",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "quechan",
+      "name": "Quechan",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "nevada_v_chemehuevi",
+    "type": "sc_case",
+    "name": "Nevada v. Chemehuevi",
+    "plaintiff": {
+      "id": "nevada",
+      "name": "Nevada",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "chemehuevi",
+      "name": "Chemehuevi",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "nevada_v_fort_mohave",
+    "type": "sc_case",
+    "name": "Nevada v. Fort Mohave",
+    "plaintiff": {
+      "id": "nevada",
+      "name": "Nevada",
+      "faction_type": "state"
+    },
+    "defendant": {
+      "id": "fort_mohave",
+      "name": "Fort Mohave",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "quechan_v_chemehuevi",
+    "type": "sc_case",
+    "name": "Quechan v. Chemehuevi",
+    "plaintiff": {
+      "id": "quechan",
+      "name": "Quechan",
+      "faction_type": "reservation"
+    },
+    "defendant": {
+      "id": "chemehuevi",
+      "name": "Chemehuevi",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "quechan_v_fort_mohave",
+    "type": "sc_case",
+    "name": "Quechan v. Fort Mohave",
+    "plaintiff": {
+      "id": "quechan",
+      "name": "Quechan",
+      "faction_type": "reservation"
+    },
+    "defendant": {
+      "id": "fort_mohave",
+      "name": "Fort Mohave",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  },
+  {
+    "id": "chemehuevi_v_fort_mohave",
+    "type": "sc_case",
+    "name": "Chemehuevi v. Fort Mohave",
+    "plaintiff": {
+      "id": "chemehuevi",
+      "name": "Chemehuevi",
+      "faction_type": "reservation"
+    },
+    "defendant": {
+      "id": "fort_mohave",
+      "name": "Fort Mohave",
+      "faction_type": "reservation"
+    },
+    "winner_reward": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "vp",
+        "amount": 3
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "loser_penalty": [
+      {
+        "resource": "water_claim_track",
+        "amount": 1
+      },
+      {
+        "resource": "money",
+        "amount": 2
+      },
+      {
+        "resource": "pr",
+        "amount": 1
+      }
+    ],
+    "art": null
+  }
+]
