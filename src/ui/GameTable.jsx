@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useGameStore } from "../engine/index.js";
+import { isActionPhase } from "../engine/index.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
@@ -718,7 +719,7 @@ function StrategyHand({ hand, player }) {
 // PHASE BAR  (top)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PhaseBar({ state, activePlayer }) {
+function PhaseBar({ state, activePlayer, children }) {
   const phaseIdx = PHASE_ORDER.indexOf(state.phase);
   const fColor   = FACTION_COLORS[activePlayer?.factionId] || "var(--terra)";
 
@@ -752,13 +753,18 @@ function PhaseBar({ state, activePlayer }) {
       </div>
 
       {/* Active player */}
-      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div style={{ width: 7, height: 7, borderRadius: 1, background: fColor,
             boxShadow: `0 0 8px ${fColor}88`, animation: "pulsedot 2s ease-in-out infinite" }} />
         <span className="f-body" style={{ fontSize: 12, color: "var(--t1)", fontStyle: "italic" }}>
-          {activePlayer?.name}'s turn
+          {activePlayer?.name}’s turn
         </span>
         <style>{`@keyframes pulsedot { 0%,100% { opacity:1 } 50% { opacity:0.4 } }`}</style>
+      </div>
+
+      {/* Phase controls (End Turn / Advance) */}
+      <div style={{ marginLeft: "auto" }}>
+        {children}
       </div>
     </div>
   );
@@ -880,32 +886,181 @@ function SharedBoardPanel({ sharedBoard, playerOrder, players }) {
 // ROOT: GAME TABLE
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function GameTable() {
-  // Pull live state from the Zustand store; fall back to mock when running standalone
-  const storeState = useGameStore(s => s.gameState);
-  const state = storeState ?? MOCK_STATE;
+// ───────────────────────────────────────────────────────────────────────────────
+// PHASE CONTROLS
+// ───────────────────────────────────────────────────────────────────────────────
 
+function PhaseControls({ phase, endPlayerTurn, advanceToNextPhase }) {
+  const inActionPhase = isActionPhase(phase);
+
+  const btnStyle = (color = "var(--terra)") => ({
+    background: "none",
+    border: `1px solid ${color}`,
+    borderRadius: 2,
+    color,
+    fontFamily: "'Courier Prime', 'Courier New', monospace",
+    fontSize: 10,
+    letterSpacing: "0.12em",
+    padding: "5px 14px",
+    cursor: "pointer",
+    textTransform: "uppercase",
+    transition: "all 0.15s",
+    whiteSpace: "nowrap",
+  });
+
+  if (inActionPhase) {
+    return (
+      <button
+        style={btnStyle("var(--terra)")}
+        onClick={endPlayerTurn}
+        onMouseEnter={e => { e.target.style.background = "var(--terra)"; e.target.style.color = "#fff"; }}
+        onMouseLeave={e => { e.target.style.background = "none";        e.target.style.color = "var(--terra)"; }}>
+        End Turn →
+      </button>
+    );
+  }
+
+  return (
+    <button
+      style={btnStyle("var(--gold)")}
+      onClick={advanceToNextPhase}
+      onMouseEnter={e => { e.target.style.background = "var(--gold)11"; e.target.style.borderColor = "var(--gold)"; }}
+      onMouseLeave={e => { e.target.style.background = "none";          e.target.style.borderColor = "var(--gold)"; }}>
+      Advance →
+    </button>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// GAME OVER OVERLAY
+// ───────────────────────────────────────────────────────────────────────────────
+
+function GameOverOverlay({ finalScores, onPlayAgain }) {
+  if (!finalScores) return null;
+
+  const sorted = [...finalScores].sort((a, b) => b.totalVP - a.totalVP);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 200,
+      background: "rgba(13,11,8,0.92)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div style={{
+        background: "var(--bg2)", border: "1px solid var(--b2)",
+        borderRadius: 4, padding: "32px 40px", minWidth: 360, maxWidth: 480,
+      }}>
+        <div className="f-display" style={{ fontSize: 18, color: "var(--gold)", letterSpacing: "0.1em",
+            textAlign: "center", marginBottom: 6 }}>
+          Game Over
+        </div>
+        <div className="f-mono" style={{ fontSize: 9, color: "var(--t4)", textAlign: "center",
+            letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 24 }}>
+          Final Standings
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 28 }}>
+          {sorted.map((entry, i) => {
+            const fColor = FACTION_COLORS[entry.factionId] || "var(--t2)";
+            return (
+              <div key={entry.playerId} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "8px 12px",
+                background: i === 0 ? "var(--bg4)" : "var(--bg3)",
+                border: `1px solid ${i === 0 ? fColor + "66" : "var(--b0)"}`,
+                borderRadius: 2,
+              }}>
+                <span className="f-mono" style={{ fontSize: 11, color: "var(--t4)", minWidth: 16 }}>
+                  {i === 0 ? "★" : `${i + 1}.`}
+                </span>
+                <div style={{ width: 7, height: 7, borderRadius: 1, background: fColor, flexShrink: 0 }} />
+                <span className="f-body" style={{ flex: 1, fontSize: 13, color: i === 0 ? "var(--t1)" : "var(--t2)" }}>
+                  {entry.name}
+                </span>
+                <span className="f-mono" style={{ fontSize: 16, color: "var(--vp)", fontWeight: 700 }}>
+                  {entry.totalVP}
+                </span>
+                <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>VP</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ textAlign: "center" }}>
+          <button
+            onClick={onPlayAgain}
+            style={{
+              background: "none", border: "1px solid var(--b2)", borderRadius: 2,
+              color: "var(--t2)", fontFamily: "'Playfair Display SC', Georgia, serif",
+              fontSize: 10, letterSpacing: "0.16em", padding: "8px 28px",
+              cursor: "pointer", transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { e.target.style.borderColor = "var(--gold)"; e.target.style.color = "var(--gold)"; }}
+            onMouseLeave={e => { e.target.style.borderColor = "var(--b2)";  e.target.style.color = "var(--t2)"; }}>
+            Play Again
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// ROOT: GAME TABLE
+// ───────────────────────────────────────────────────────────────────────────────
+
+export default function GameTable() {
+  // ── Live store values ──────────────────────────────────────────────
+  const storeState         = useGameStore(s => s.gameState);
+  const storePending       = useGameStore(s => s.pendingEffects);
+  const isGameOver         = useGameStore(s => s.isGameOver);
+  const finalScores        = useGameStore(s => s.finalScores);
+  const endPlayerTurn      = useGameStore(s => s.endPlayerTurn);
+  const advanceToNextPhase = useGameStore(s => s.advanceToNextPhase);
+
+  // Fall back to mock when running standalone (no initGame called yet)
+  const state          = storeState ?? MOCK_STATE;
+  const pendingEffects = storeState ? (storePending ?? []) : (MOCK_STATE.pendingEffects ?? []);
+
+  // Merge real card definitions into the display lookup (real data wins over mock stubs)
+  if (state.cardIndex) Object.assign(CARD_INDEX, state.cardIndex);
+
+  // ── Local UI state ────────────────────────────────────────────────
   const [viewedPlayerId, setViewedPlayerId] = useState(state.playerOrder[0]);
 
-  // Keep viewed player in sync when the active player changes (e.g. after end-turn)
+  // Track the active player; auto-switch the viewed tab to follow them
   const activeId = state.playerOrder[state.activePlayerIndex];
   useEffect(() => { setViewedPlayerId(activeId); }, [activeId]);
 
-  // Merge real card definitions into the display lookup (real data wins over mock)
-  if (state.cardIndex) Object.assign(CARD_INDEX, state.cardIndex);
-
-  const activePlayer = state.players[state.playerOrder[state.activePlayerIndex]];
-  // Guard: if viewedPlayerId no longer exists (e.g. after faction change), reset to first
+  // Guard against a stale viewedPlayerId after state changes
   const safeViewedId = state.players[viewedPlayerId] ? viewedPlayerId : state.playerOrder[0];
+  const activePlayer = state.players[activeId];
   const viewedPlayer = state.players[safeViewedId];
+
+  // ── Handlers ─────────────────────────────────────────────────────
+  // In mock/dev mode, these are no-ops so buttons render without crashing
+  const handleEndTurn      = storeState ? endPlayerTurn      : () => {};
+  const handleAdvancePhase = storeState ? advanceToNextPhase : () => {};
+  const handlePlayAgain    = () => window.location.reload();
 
   return (
     <div className="grain" style={{ width: "100vw", height: "100vh", display: "flex",
         flexDirection: "column", background: "var(--bg0)", overflow: "hidden", position: "relative" }}>
       <GlobalStyles />
 
+      {/* ── Game Over overlay ── */}
+      {isGameOver && (
+        <GameOverOverlay finalScores={finalScores} onPlayAgain={handlePlayAgain} />
+      )}
+
       {/* ── Phase Bar ── */}
-      <PhaseBar state={state} activePlayer={activePlayer} />
+      <PhaseBar state={state} activePlayer={activePlayer}>
+        <PhaseControls
+          phase={state.phase}
+          endPlayerTurn={handleEndTurn}
+          advanceToNextPhase={handleAdvancePhase}
+        />
+      </PhaseBar>
 
       {/* ── Main 3-column layout ── */}
       <div style={{ flex: 1, display: "grid", gridTemplateColumns: "220px 1fr 230px",
@@ -928,8 +1083,8 @@ export default function GameTable() {
               padding: "0 16px", background: "var(--bg1)", flexShrink: 0 }}>
             {state.playerOrder.map((pid) => {
               const p = state.players[pid];
-              const isActive = pid === state.playerOrder[state.activePlayerIndex];
-              const isViewed = pid === safeViewedId;
+              const isActivePid = pid === activeId;
+              const isViewed    = pid === safeViewedId;
               return (
                 <button key={pid}
                   className={`player-tab f-display ${isViewed ? "active" : ""}`}
@@ -939,7 +1094,7 @@ export default function GameTable() {
                       borderBottom: `2px solid ${isViewed ? FACTION_COLORS[p.factionId] || "var(--gold)" : "transparent"}`,
                       color: isViewed ? "var(--t1)" : "var(--t3)", transition: "all 0.15s",
                       display: "flex", alignItems: "center", gap: 6 }}>
-                  {isActive && (
+                  {isActivePid && (
                     <div style={{ width: 5, height: 5, borderRadius: "50%",
                         background: FACTION_COLORS[p.factionId] || "var(--terra)",
                         boxShadow: `0 0 6px ${FACTION_COLORS[p.factionId] || "var(--terra)"}` }} />
@@ -959,7 +1114,7 @@ export default function GameTable() {
 
         {/* RIGHT — Action log */}
         <div style={{ borderLeft: "1px solid var(--b0)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <ActionLog log={state.actionLog} pendingEffects={state.pendingEffects} />
+          <ActionLog log={state.actionLog} pendingEffects={pendingEffects} />
         </div>
       </div>
 
