@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useGameStore } from "../engine/index.js";
-import { isActionPhase } from "../engine/index.js";
+import { isActionPhase, satisfiesPrRequirement } from "../engine/index.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
@@ -367,14 +367,87 @@ const ACTION_ICONS = {
   pr: "★", sc_influence: "⚖", protest_influence: "✊",
 };
 
-function CardFace({ cardId, exhaustState = "ready", width = 130, onClick }) {
+/**
+ * CardFace
+ *
+ * Read-only by default.  When `interactive` is true the component shows
+ * play buttons appropriate for the current phase:
+ *   action_n → "Play N" button appears in the N-action panel
+ *   action_c → "Play C" button appears in the C-action panel
+ *
+ * Props
+ *   interactive  boolean          — enables play buttons
+ *   phase        string           — current game phase (PHASES.*)
+ *   prValue      number           — player's current PR (for PR-requirement check)
+ *   canPlay      boolean          — false when it's not this player's turn
+ *   onPlay       fn(side: 'N'|'C') — called when a play button is clicked
+ */
+function CardFace({
+  cardId,
+  exhaustState = "ready",
+  width = 130,
+  onClick,
+  // interactive props
+  interactive = false,
+  phase,
+  prValue,
+  canPlay = false,
+  onPlay,
+}) {
   const def = CARD_INDEX[cardId];
   if (!def) return null;
 
   const typeColor = CARD_COLORS[def.type] || "var(--t2)";
   const exhausted = exhaustState === "exhausted";
   const locked    = exhaustState === "locked";
-  const cls       = ["card-face", exhausted && "exhausted", locked && "locked"].filter(Boolean).join(" ");
+  const disabled  = exhausted || locked || !canPlay;
+
+  const prOk = satisfiesPrRequirement(def.pr_requirement, prValue ?? 0);
+  const cardDisabled = disabled || !prOk;
+
+  const cls = ["card-face", exhausted && "exhausted", locked && "locked"].filter(Boolean).join(" ");
+
+  // Which side button to show
+  const showN = interactive && phase === "action_n" && !!def.actions?.N;
+  const showC = interactive && phase === "action_c" && !!def.actions?.C;
+
+  function PlayBtn({ side }) {
+    const sideDisabled = cardDisabled;
+    const label = `Play ${side}`;
+    const hoverColor = side === "N" ? "var(--terra)" : "var(--water)";
+    return (
+      <button
+        disabled={sideDisabled}
+        title={
+          locked    ? "Card is locked (Red Herring)" :
+          exhausted ? "Card already used this round" :
+          !canPlay  ? "Not your turn" :
+          !prOk     ? `PR requirement not met (need ${def.pr_requirement?.operator === "gte" ? "≥" : "≤"} ${def.pr_requirement?.value})` :
+          undefined
+        }
+        onClick={e => { e.stopPropagation(); if (!sideDisabled && onPlay) onPlay(side); }}
+        onMouseEnter={e => { if (!sideDisabled) e.currentTarget.style.background = hoverColor + "22"; }}
+        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+        style={{
+          marginTop: 4,
+          width: "100%",
+          padding: "3px 0",
+          background: "transparent",
+          border: `1px solid ${sideDisabled ? "var(--b1)" : hoverColor}`,
+          borderRadius: 2,
+          color: sideDisabled ? "var(--t4)" : hoverColor,
+          fontFamily: "'Courier Prime', 'Courier New', monospace",
+          fontSize: 8,
+          letterSpacing: "0.14em",
+          textTransform: "uppercase",
+          cursor: sideDisabled ? "not-allowed" : "pointer",
+          opacity: sideDisabled ? 0.45 : 1,
+          transition: "all 0.12s",
+        }}>
+        {label}
+      </button>
+    );
+  }
 
   return (
     <div className={cls} style={{ width, borderRadius: 3 }} onClick={onClick}>
@@ -394,8 +467,9 @@ function CardFace({ cardId, exhaustState = "ready", width = 130, onClick }) {
       {/* PR requirement badge */}
       {def.pr_requirement && (
         <div style={{ padding: "2px 7px", background: "var(--bg4)", borderBottom: "1px solid var(--b1)" }}>
-          <span className="f-mono" style={{ fontSize: 8, color: "var(--t3)" }}>
+          <span className="f-mono" style={{ fontSize: 8, color: prOk ? "var(--t3)" : "var(--pr-neg)" }}>
             PR {def.pr_requirement.operator === "gte" ? "≥" : "≤"} {def.pr_requirement.value}
+            {!prOk && " ✗"}
           </span>
         </div>
       )}
@@ -411,12 +485,18 @@ function CardFace({ cardId, exhaustState = "ready", width = 130, onClick }) {
 
       {/* N action */}
       {def.actions?.N ? (
-        <div style={{ padding: "5px 7px", borderBottom: def.actions?.C ? "1px solid var(--b0)" : "none", minHeight: 36 }}>
-          <div className="f-mono" style={{ fontSize: 8, color: "var(--t3)", marginBottom: 2 }}>N ·</div>
+        <div style={{
+          padding: "5px 7px",
+          borderBottom: def.actions?.C ? "1px solid var(--b0)" : "none",
+          minHeight: 36,
+          background: showN ? "var(--bg3)" : undefined,
+        }}>
+          <div className="f-mono" style={{ fontSize: 8, color: showN ? "var(--terra)" : "var(--t3)", marginBottom: 2 }}>N ·</div>
           <div className="f-body" style={{ fontSize: 10, color: "var(--t2)", lineHeight: 1.35 }}>
             {def.actions.N.icon && <span style={{ marginRight: 3 }}>{ACTION_ICONS[def.actions.N.icon] || def.actions.N.icon}</span>}
             {def.actions.N.text}
           </div>
+          {showN && <PlayBtn side="N" />}
         </div>
       ) : (
         <div style={{ padding: "5px 7px", borderBottom: def.actions?.C ? "1px solid var(--b0)" : "none", minHeight: 36 }}>
@@ -426,12 +506,17 @@ function CardFace({ cardId, exhaustState = "ready", width = 130, onClick }) {
 
       {/* C action */}
       {def.actions?.C && (
-        <div style={{ padding: "5px 7px", minHeight: 36 }}>
-          <div className="f-mono" style={{ fontSize: 8, color: "var(--t3)", marginBottom: 2 }}>C ·</div>
+        <div style={{
+          padding: "5px 7px",
+          minHeight: 36,
+          background: showC ? "var(--bg3)" : undefined,
+        }}>
+          <div className="f-mono" style={{ fontSize: 8, color: showC ? "var(--water)" : "var(--t3)", marginBottom: 2 }}>C ·</div>
           <div className="f-body" style={{ fontSize: 10, color: "var(--t2)", lineHeight: 1.35 }}>
             {def.actions.C.icon && <span style={{ marginRight: 3 }}>{ACTION_ICONS[def.actions.C.icon] || def.actions.C.icon}</span>}
             {def.actions.C.text}
           </div>
+          {showC && <PlayBtn side="C" />}
         </div>
       )}
 
@@ -634,8 +719,18 @@ function WaterBankWidget({ waterBank }) {
 // PLAYER BOARD  (center panel)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PlayerBoard({ player }) {
-  const fColor = FACTION_COLORS[player.factionId] || "var(--terra)";
+/**
+ * PlayerBoard
+ *
+ * Extra props for interactive mode:
+ *   isActivePlayer  boolean          — true when this player is the active player this turn
+ *   phase           string           — current game phase
+ *   onPlayCard      fn(cardId, side) — fires when a tableau card play button is clicked
+ */
+function PlayerBoard({ player, isActivePlayer = false, phase, onPlayCard }) {
+  const fColor  = FACTION_COLORS[player.factionId] || "var(--terra)";
+  const prValue = player.prTrack?.value ?? 0;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
@@ -682,8 +777,17 @@ function PlayerBoard({ player }) {
           <Label>Tableau</Label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {player.tableau.map((instance) => (
-              <CardFace key={instance.instanceId} cardId={instance.cardId}
-                exhaustState={instance.exhaustState} width={130} />
+              <CardFace
+                key={instance.instanceId}
+                cardId={instance.cardId}
+                exhaustState={instance.exhaustState}
+                width={130}
+                interactive={isActivePlayer && (phase === "action_n" || phase === "action_c")}
+                phase={phase}
+                prValue={prValue}
+                canPlay={isActivePlayer}
+                onPlay={(side) => onPlayCard?.(instance.cardId, side)}
+              />
             ))}
           </div>
         </div>
@@ -696,20 +800,62 @@ function PlayerBoard({ player }) {
 // STRATEGY HAND  (bottom strip)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StrategyHand({ hand, player }) {
+/**
+ * StrategyHand
+ *
+ * Renders strategy cards held in the active player's hand.
+ * In action_n phase, each card shows a "Play" button that fires onPlayStrategy.
+ *
+ * Props
+ *   hand             string[]         — array of cardIds
+ *   isActivePlayer   boolean
+ *   phase            string
+ *   onPlayStrategy   fn(cardId)       — plays the card as its N-side action
+ */
+function StrategyHand({ hand, isActivePlayer = false, phase, onPlayStrategy }) {
+  const showPlay = isActivePlayer && phase === "action_n";
+
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "10px 16px",
-        background: "var(--bg1)", borderTop: "1px solid var(--b0)", minHeight: 72 }}>
-      <div style={{ marginRight: 4 }}>
+        background: "var(--bg1)", borderTop: "1px solid var(--b0)", minHeight: 72, overflowX: "auto" }}>
+      <div style={{ marginRight: 4, flexShrink: 0 }}>
         <Label style={{ marginBottom: 2 }}>Hand</Label>
         <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>{hand.length} card{hand.length !== 1 ? "s" : ""}</span>
       </div>
       {hand.length === 0 ? (
         <span className="f-mono" style={{ fontSize: 10, color: "var(--t4)" }}>— no strategy cards —</span>
       ) : (
-        hand.map((cardId, i) => (
-          <CardFace key={`${cardId}_${i}`} cardId={cardId} exhaustState="ready" width={120} />
-        ))
+        hand.map((cardId, i) => {
+          const def = CARD_INDEX[cardId];
+          return (
+            <div key={`${cardId}_${i}`} style={{ position: "relative", flexShrink: 0 }}>
+              <CardFace cardId={cardId} exhaustState="ready" width={120} />
+              {showPlay && def && (
+                <button
+                  onClick={() => onPlayStrategy?.(cardId)}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--strategy)22"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                  style={{
+                    marginTop: 3,
+                    width: "100%",
+                    padding: "3px 0",
+                    background: "transparent",
+                    border: "1px solid var(--strategy)",
+                    borderRadius: 2,
+                    color: "var(--strategy)",
+                    fontFamily: "'Courier Prime', 'Courier New', monospace",
+                    fontSize: 8,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                    transition: "all 0.12s",
+                  }}>
+                  Play
+                </button>
+              )}
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -1084,6 +1230,7 @@ export default function GameTable() {
   const finalScores        = useGameStore(s => s.finalScores);
   const endPlayerTurn      = useGameStore(s => s.endPlayerTurn);
   const advanceToNextPhase = useGameStore(s => s.advanceToNextPhase);
+  const playCardAction     = useGameStore(s => s.playCardAction);
 
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
@@ -1109,6 +1256,13 @@ export default function GameTable() {
   const handleEndTurn      = storeState ? endPlayerTurn      : () => {};
   const handleAdvancePhase = storeState ? advanceToNextPhase : () => {};
   const handlePlayAgain    = () => window.location.reload();
+
+  // Card action handler — routes through the store's playCardAction.
+  // playerId is always the active player (engine enforces turn order).
+  const handlePlayCard = (cardId, side) => {
+    if (storeState && activePlayer) playCardAction(activePlayer.id, cardId, side);
+  };
+  const handlePlayStrategy = (cardId) => handlePlayCard(cardId, 'N');
 
   return (
     <div className="grain" style={{ width: "100vw", height: "100vh", display: "flex",
@@ -1178,7 +1332,12 @@ export default function GameTable() {
 
           {/* Scrollable board area */}
           <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px" }}>
-            <PlayerBoard player={viewedPlayer} />
+            <PlayerBoard
+              player={viewedPlayer}
+              isActivePlayer={safeViewedId === activeId}
+              phase={state.phase}
+              onPlayCard={handlePlayCard}
+            />
           </div>
         </div>
 
@@ -1189,7 +1348,12 @@ export default function GameTable() {
       </div>
 
       {/* ── Strategy Hand (bottom strip) ── */}
-      <StrategyHand hand={viewedPlayer.hand} player={viewedPlayer} />
+      <StrategyHand
+        hand={viewedPlayer.hand}
+        isActivePlayer={safeViewedId === activeId}
+        phase={state.phase}
+        onPlayStrategy={handlePlayStrategy}
+      />
     </div>
   );
 }
