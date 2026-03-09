@@ -352,6 +352,13 @@ export const useGameStore = create((set, get) => ({
       ],
       pendingEffects: [],
     });
+    // Clear any pending_partnership_acquire effect for this player (law_firm)
+    set(s => ({
+      pendingEffects: s.pendingEffects.filter(
+        e => !(e.type === 'pending_partnership_acquire' && e.playerId === playerId
+              && e.marketType === 'lawyer')
+      ),
+    }));
   },
 
   /**
@@ -398,6 +405,13 @@ export const useGameStore = create((set, get) => ({
       ],
       pendingEffects: [],
     });
+    // Clear any pending_partnership_acquire effect for this player (business)
+    set(s => ({
+      pendingEffects: s.pendingEffects.filter(
+        e => !(e.type === 'pending_partnership_acquire' && e.playerId === playerId
+              && e.marketType === 'activist')
+      ),
+    }));
   },
 
   // ── Partnership actions ────────────────────────────────────────────────────
@@ -523,7 +537,18 @@ export const useGameStore = create((set, get) => ({
       extraLog   = prLog;
       extraFx    = prFx;
     }
-    // law_firm / business: money deducted; UI then calls acquireLawyer/acquireActivist
+    // law_firm / business: money deducted; emit a pending effect so the UI
+    // can guide the player to pick a card from the market.
+    if (partnershipId === 'law_firm' || partnershipId === 'business') {
+      extraFx.push({
+        type:          'pending_partnership_acquire',
+        partnershipId,
+        playerId,
+        marketType:    partnershipId === 'law_firm' ? 'lawyer' : 'activist',
+        message: `${player.name} paid $${abilityCost.amount} — now acquire a `
+          + `${partnershipId === 'law_firm' ? 'Lawyer' : 'Activist'} from the market`,
+      });
+    }
 
     _dispatch({
       playerPatches: { [playerId]: { ...moneyPatch, ...extraPatch } },

@@ -571,6 +571,15 @@ function MarketGrid({
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
         <Label style={{ margin: 0 }}>{label}</Label>
+        {showButtons && marketType === "lawyer" && (activePlayer?.pendingLawyerDiscount ?? 0) > 0 && (
+          <span className="f-mono" style={{
+            fontSize: 8, color: "var(--gold)",
+            padding: "1px 6px", border: "1px solid var(--gold-dim)",
+            borderRadius: 2, marginLeft: 6,
+          }}>
+            −${activePlayer.pendingLawyerDiscount} discount active
+          </span>
+        )}
         <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)", marginLeft: "auto" }}>
           deck: {deckCount}
         </span>
@@ -769,10 +778,19 @@ const PARTNERSHIP_DEFS = [
  *   onBuy            fn(partnershipId)
  *   onUse            fn(partnershipId)
  */
-function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, onBuy, onUse }) {
+function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pendingLawyerDiscount = 0, onBuy, onUse }) {
   return (
     <div>
       <Label>Partnerships</Label>
+      {pendingLawyerDiscount > 0 && (
+        <div className="f-mono" style={{
+          fontSize: 8, color: "var(--gold)", padding: "2px 8px",
+          border: "1px solid var(--gold-dim)", borderRadius: 2,
+          marginBottom: 5, letterSpacing: "0.08em",
+        }}>
+          ⚡ Next lawyer −${pendingLawyerDiscount} (Team Player)
+        </div>
+      )}
       <div style={{ display: "flex", gap: 5 }}>
         {PARTNERSHIP_DEFS.map((p) => {
           const owned       = partnerships[p.id];
@@ -1043,6 +1061,7 @@ function PlayerBoard({
           partnerships={player.partnerships}
           isActivePlayer={isActivePlayer}
           money={player.moneyTrack?.value ?? 0}
+          pendingLawyerDiscount={player.pendingLawyerDiscount ?? 0}
           onBuy={onBuyPartnership}
           onUse={onUsePartnership}
         />
@@ -1199,7 +1218,7 @@ function StrategyHand({ hand, isActivePlayer = false, phase, onPlayStrategy }) {
 // PHASE BAR  (top)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PhaseBar({ state, activePlayer, children }) {
+function PhaseBar({ state, activePlayer, canUndo, canRedo, onUndo, onRedo, children }) {
   const phaseIdx = PHASE_ORDER.indexOf(state.phase);
   const fColor   = FACTION_COLORS[activePlayer?.factionId] || "var(--terra)";
 
@@ -1243,7 +1262,39 @@ function PhaseBar({ state, activePlayer, children }) {
       </div>
 
       {/* Phase controls (End Turn / Advance) */}
-      <div style={{ marginLeft: "auto" }}>
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+        {canUndo && (
+          <button
+            onClick={onUndo}
+            title="Undo last action"
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--b2)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+            style={{
+              background: "transparent", border: "1px solid var(--b2)",
+              borderRadius: 2, color: "var(--t3)",
+              fontFamily: "'Courier Prime', monospace",
+              fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+              padding: "3px 10px", cursor: "pointer", transition: "all 0.12s",
+            }}>
+            ↩ Undo
+          </button>
+        )}
+        {canRedo && (
+          <button
+            onClick={onRedo}
+            title="Redo last undone action"
+            onMouseEnter={e => { e.currentTarget.style.background = "var(--b2)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+            style={{
+              background: "transparent", border: "1px solid var(--b2)",
+              borderRadius: 2, color: "var(--t3)",
+              fontFamily: "'Courier Prime', monospace",
+              fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+              padding: "3px 10px", cursor: "pointer", transition: "all 0.12s",
+            }}>
+            Redo ↪
+          </button>
+        )}
         {children}
       </div>
     </div>
@@ -1272,12 +1323,28 @@ function ActionLog({ log, pendingEffects }) {
       {pendingEffects.length > 0 && (
         <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--b0)", flexShrink: 0 }}>
           <Label>Awaiting Input</Label>
-          {pendingEffects.map((e, i) => (
-            <div key={i} className="pending-card" style={{ padding: "7px 9px", borderRadius: 2, marginBottom: 4 }}>
-              <div className="f-body" style={{ fontSize: 11, color: "var(--terra)", marginBottom: 3 }}>⟳ {e.subtype}</div>
-              <div className="f-body" style={{ fontSize: 11, color: "var(--t2)", lineHeight: 1.4 }}>{e.message}</div>
-            </div>
-          ))}
+          {pendingEffects.map((e, i) => {
+            const isPartnershipAcquire = e.type === "pending_partnership_acquire";
+            const accentColor = isPartnershipAcquire ? "var(--gold)" : "var(--terra)";
+            const icon = isPartnershipAcquire
+              ? (e.marketType === "lawyer" ? "⚖" : "✊")
+              : "⟳";
+            const label = isPartnershipAcquire
+              ? `Acquire from ${e.marketType === "lawyer" ? "Lawyer" : "Activist"} Market`
+              : (e.subtype || e.type);
+            return (
+              <div key={i} className="pending-card"
+                style={{ padding: "7px 9px", borderRadius: 2, marginBottom: 4,
+                  borderColor: isPartnershipAcquire ? "var(--gold-dim)" : undefined }}>
+                <div className="f-body" style={{ fontSize: 11, color: accentColor, marginBottom: 3 }}>
+                  {icon} {label}
+                </div>
+                <div className="f-body" style={{ fontSize: 11, color: "var(--t2)", lineHeight: 1.4 }}>
+                  {e.message}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -2397,7 +2464,10 @@ export default function GameTable() {
   const acquireLawyer              = useGameStore(s => s.acquireLawyer);
   const acquireActivist            = useGameStore(s => s.acquireActivist);
   const undo                       = useGameStore(s => s.undo);
+  const redo                       = useGameStore(s => s.redo);
   const dismissChoiceEffect        = useGameStore(s => s.dismissChoiceEffect);
+  const canUndo = (state.undoStack?.length ?? 0) > 0;
+  const canRedo = (state.redoStack?.length ?? 0) > 0;
 
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
@@ -2485,6 +2555,10 @@ export default function GameTable() {
     if (storeState && activePlayer) acquireActivist(activePlayer.id, marketIndex);
   };
 
+  // Global undo/redo handlers
+  const handleUndo = () => { if (storeState) undo(); };
+  const handleRedo = () => { if (storeState) redo(); };
+
   // Undo a card play from inside a choice modal (undo game state + clear the
   // pending effect, which lives outside gameState on the store top-level)
   const handleUndoChoiceCard = () => {
@@ -2504,7 +2578,7 @@ export default function GameTable() {
       )}
 
       {/* ── Phase Bar ── */}
-      <PhaseBar state={state} activePlayer={activePlayer}>
+      <PhaseBar state={state} activePlayer={activePlayer} canUndo={canUndo} canRedo={canRedo} onUndo={handleUndo} onRedo={handleRedo}>
         <PhaseControls
           phase={state.phase}
           activePlayer={activePlayer}
