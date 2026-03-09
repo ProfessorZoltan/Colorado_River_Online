@@ -480,6 +480,55 @@ export const useGameStore = create((set, get) => ({
     });
   },
 
+  // ── Water deallocation (remove cubes from a project) ─────────────────────────
+
+  /**
+   * Remove water cubes from a project (used by the − button in the
+   * Water Allocation modal to undo over-allocation).
+   */
+  deallocateWater(playerId, projectType, projectId, cubeCount) {
+    const { gameState, _dispatch } = get();
+    const player  = gameState.players[playerId];
+    const project = player.projects[projectType]?.[projectId];
+
+    if (!project) { console.warn(`deallocateWater: unknown project ${projectType}/${projectId}`); return; }
+
+    const toRemove = Math.min(cubeCount, project.watered);
+    if (toRemove <= 0) { console.warn('deallocateWater: nothing to remove'); return; }
+
+    const newProjects = {
+      ...player.projects,
+      [projectType]: {
+        ...player.projects[projectType],
+        [projectId]: { ...project, watered: project.watered - toRemove },
+      },
+    };
+
+    _dispatch({
+      playerPatches: { [playerId]: { projects: newProjects } },
+      sharedPatches: { waterSupply: gameState.sharedBoard.waterSupply + toRemove },
+      logEntries: [{
+        type:    'water_deallocated',
+        playerId,
+        projectId,
+        projectType,
+        cubeCount: toRemove,
+        message: `${player.name} removes ${toRemove} water from ${projectId} (${project.watered - toRemove}/${project.water_slots})`,
+      }],
+      pendingEffects: [],
+    });
+  },
+
+  /**
+   * Dismiss the water_allocation pendingEffect — called when the player
+   * clicks "Done Allocating".  Unblocks the Advance button.
+   */
+  dismissWaterAllocation() {
+    set(s => ({
+      pendingEffects: s.pendingEffects.filter(e => e.type !== 'water_allocation'),
+    }));
+  },
+
   // ── Pending effect resolution (called by UI) ────────────────────────────────
 
   resolveChoice(choiceData) {

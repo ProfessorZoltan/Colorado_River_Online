@@ -1036,6 +1036,268 @@ function SharedBoardPanel({ sharedBoard, playerOrder, players }) {
 // PHASE CONTROLS
 // ───────────────────────────────────────────────────────────────────────────────
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WATER ALLOCATION MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * WaterAllocationModal
+ *
+ * Shown during the WATER phase while the water_allocation pendingEffect is
+ * unresolved.  Lets all players distribute water cubes to their projects.
+ *
+ * Layout:
+ *   - Water supply counter (shared pool, live)
+ *   - One section per player; their projects listed as rows
+ *   - Each project row shows current fill, +1 / Fill / −1 buttons
+ *   - "Done" button dismisses the pendingEffect, enabling Advance
+ *
+ * Props
+ *   state           full gameState
+ *   waterSupply     number (from sharedBoard.waterSupply)
+ *   onAllocate      fn(playerId, projectType, projectId, count)
+ *   onDone          fn() — clears the water_allocation pendingEffect
+ */
+function WaterAllocationModal({ state, waterSupply, onAllocate, onDone }) {
+  const allDefs = {
+    citizen: PROJECT_DEFS.citizen,
+    income:  PROJECT_DEFS.income,
+  };
+
+  // Tally unfilled slots across all players to show a "fill all" affordance
+  const totalUnfilled = state.playerOrder.reduce((sum, pid) => {
+    const p = state.players[pid];
+    return sum + Object.entries({ ...p.projects.citizen, ...p.projects.income })
+      .reduce((s, [, proj]) => s + Math.max(0, proj.water_slots - proj.watered), 0);
+  }, 0);
+
+  return (
+    <div style={{
+      position: "absolute", inset: 0, zIndex: 100,
+      background: "rgba(13,11,8,0.82)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 24,
+    }}>
+      <div style={{
+        background: "var(--bg2)", border: "1px solid var(--water-dim)",
+        borderRadius: 4, width: "100%", maxWidth: 700,
+        maxHeight: "90vh", display: "flex", flexDirection: "column",
+        boxShadow: "0 24px 64px rgba(0,0,0,0.7)",
+      }}>
+
+        {/* Header */}
+        <div style={{
+          padding: "14px 20px", borderBottom: "1px solid var(--b1)",
+          display: "flex", alignItems: "center", gap: 16, flexShrink: 0,
+        }}>
+          <span className="f-display" style={{ fontSize: 13, color: "var(--water)", letterSpacing: "0.08em" }}>
+            Water Allocation
+          </span>
+          <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", textTransform: "uppercase",
+              letterSpacing: "0.12em" }}>
+            Round {state.round}
+          </span>
+
+          {/* Supply counter */}
+          <div style={{
+            marginLeft: "auto", display: "flex", alignItems: "center", gap: 10,
+            padding: "5px 14px", border: "1px solid var(--water-dim)",
+            borderRadius: 2, background: "var(--bg3)",
+          }}>
+            <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", textTransform: "uppercase",
+                letterSpacing: "0.1em" }}>
+              Supply
+            </span>
+            <span className="f-mono" style={{
+              fontSize: 22, color: waterSupply > 0 ? "var(--water-bright)" : "var(--t4)",
+              fontWeight: 700, lineHeight: 1,
+            }}>
+              {waterSupply}
+            </span>
+            <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>💧</span>
+          </div>
+        </div>
+
+        {/* Body — scrollable */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px" }}>
+          {state.playerOrder.map((pid) => {
+            const player = state.players[pid];
+            const fColor = FACTION_COLORS[player.factionId] || "var(--terra)";
+            return (
+              <div key={pid} style={{ marginBottom: 20 }}>
+                {/* Player sub-header */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  marginBottom: 8, paddingBottom: 5,
+                  borderBottom: "1px solid var(--b1)",
+                }}>
+                  <div style={{ width: 7, height: 7, borderRadius: 1, background: fColor }} />
+                  <span className="f-body" style={{ fontSize: 12, color: "var(--t1)" }}>{player.name}</span>
+                  <span className="f-mono" style={{ fontSize: 9, color: "var(--water)", marginLeft: 4 }}>
+                    {player.waterCubes} 💧
+                  </span>
+                </div>
+
+                {/* Projects */}
+                {["citizen", "income"].map((ptype) => (
+                  <div key={ptype} style={{ marginBottom: 8 }}>
+                    <div className="f-mono" style={{ fontSize: 8, color: "var(--t4)",
+                        textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 4 }}>
+                      {ptype === "citizen" ? "Citizen Projects" : "Income Projects"}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {allDefs[ptype].map((def) => {
+                        const proj     = player.projects[ptype]?.[def.id] || { watered: 0, water_slots: def.slots };
+                        const slots    = proj.water_slots ?? def.slots;
+                        const watered  = proj.watered;
+                        const full     = watered >= slots;
+                        const empty    = watered === 0;
+                        const canAdd1  = !full && waterSupply >= 1;
+                        const canFill  = !full && waterSupply >= (slots - watered);
+                        const canSub1  = watered > 0;
+
+                        const rowBorder = full
+                          ? "var(--water-dim)"
+                          : watered > 0 ? "var(--terra-dim)" : "var(--b0)";
+
+                        return (
+                          <div key={def.id} style={{
+                            display: "flex", alignItems: "center", gap: 8,
+                            padding: "5px 8px",
+                            background: "var(--bg3)",
+                            border: `1px solid ${rowBorder}`,
+                            borderRadius: 2,
+                          }}>
+                            <span style={{ fontSize: 11, flexShrink: 0 }}>{def.icon}</span>
+                            <span className="f-body" style={{ fontSize: 11, color: "var(--t2)", minWidth: 80 }}>
+                              {def.label}
+                            </span>
+
+                            {/* Water slots visual */}
+                            <div style={{ display: "flex", gap: 3, flex: 1 }}>
+                              {Array.from({ length: slots }).map((_, i) => (
+                                <div key={i} className={`wslot ${i < watered ? "on" : ""}`} />
+                              ))}
+                              <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)", marginLeft: 4 }}>
+                                {watered}/{slots}
+                              </span>
+                            </div>
+
+                            {/* Reward label */}
+                            <span className="f-mono" style={{
+                              fontSize: 8,
+                              color: ptype === "citizen" ? "var(--pr-pos)" : "var(--money)",
+                              minWidth: 70, textAlign: "right",
+                            }}>
+                              {def.reward}
+                            </span>
+
+                            {/* Allocation buttons */}
+                            <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                              <AllocBtn
+                                label="−"
+                                enabled={canSub1}
+                                color="var(--terra)"
+                                title="Remove 1 water cube"
+                                onClick={() => onAllocate(pid, ptype, def.id, -1)}
+                              />
+                              <AllocBtn
+                                label="+1"
+                                enabled={canAdd1}
+                                color="var(--water)"
+                                title="Add 1 water cube"
+                                onClick={() => onAllocate(pid, ptype, def.id, 1)}
+                              />
+                              <AllocBtn
+                                label="Fill"
+                                enabled={canFill}
+                                color="var(--water-bright)"
+                                title={`Fill all ${slots - watered} remaining slots`}
+                                onClick={() => onAllocate(pid, ptype, def.id, slots - watered)}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: "12px 20px", borderTop: "1px solid var(--b1)",
+          display: "flex", alignItems: "center", gap: 12, flexShrink: 0,
+        }}>
+          {waterSupply > 0 && (
+            <span className="f-mono" style={{ fontSize: 9, color: "var(--water-dim)", letterSpacing: "0.08em" }}>
+              {waterSupply} cube{waterSupply !== 1 ? "s" : ""} remain unallocated
+            </span>
+          )}
+          {waterSupply === 0 && (
+            <span className="f-mono" style={{ fontSize: 9, color: "var(--water-bright)", letterSpacing: "0.08em" }}>
+              ✓ All water distributed
+            </span>
+          )}
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            {/* Always allow Done — players may intentionally leave supply unspent */}
+            <button
+              onClick={onDone}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--water)"; e.currentTarget.style.color = "#fff"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--water)"; }}
+              style={{
+                background: "none",
+                border: "1px solid var(--water)",
+                borderRadius: 2,
+                color: "var(--water)",
+                fontFamily: "'Courier Prime', 'Courier New', monospace",
+                fontSize: 10,
+                letterSpacing: "0.14em",
+                padding: "6px 20px",
+                cursor: "pointer",
+                textTransform: "uppercase",
+                transition: "all 0.15s",
+              }}>
+              Done Allocating
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Small +/− allocation button used inside WaterAllocationModal */
+function AllocBtn({ label, enabled, color, title, onClick }) {
+  return (
+    <button
+      disabled={!enabled}
+      title={title}
+      onClick={onClick}
+      onMouseEnter={e => { if (enabled) e.currentTarget.style.background = color + "22"; }}
+      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+      style={{
+        background: "transparent",
+        border: `1px solid ${enabled ? color : "var(--b1)"}`,
+        borderRadius: 2,
+        color: enabled ? color : "var(--t4)",
+        fontFamily: "'Courier Prime', 'Courier New', monospace",
+        fontSize: 9,
+        padding: "2px 7px",
+        cursor: enabled ? "pointer" : "not-allowed",
+        opacity: enabled ? 1 : 0.4,
+        transition: "all 0.12s",
+        whiteSpace: "nowrap",
+      }}>
+      {label}
+    </button>
+  );
+}
+
 /**
  * PhaseControls
  *
@@ -1230,7 +1492,10 @@ export default function GameTable() {
   const finalScores        = useGameStore(s => s.finalScores);
   const endPlayerTurn      = useGameStore(s => s.endPlayerTurn);
   const advanceToNextPhase = useGameStore(s => s.advanceToNextPhase);
-  const playCardAction     = useGameStore(s => s.playCardAction);
+  const playCardAction             = useGameStore(s => s.playCardAction);
+  const allocateWater              = useGameStore(s => s.allocateWater);
+  const dismissWaterAllocation     = useGameStore(s => s.dismissWaterAllocation);
+  const deallocateWater            = useGameStore(s => s.deallocateWater);
 
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
@@ -1263,6 +1528,21 @@ export default function GameTable() {
     if (storeState && activePlayer) playCardAction(activePlayer.id, cardId, side);
   };
   const handlePlayStrategy = (cardId) => handlePlayCard(cardId, 'N');
+
+  // Water allocation handlers
+  const waterAllocationEffect = pendingEffects.find(e => e.type === 'water_allocation');
+  const handleAllocateWater = (playerId, projectType, projectId, count) => {
+    if (!storeState) return;
+    if (count > 0) {
+      allocateWater(playerId, projectType, projectId, count);
+    } else if (count < 0) {
+      // Remove cubes: handled via a direct dispatch in the store
+      deallocateWater(playerId, projectType, projectId, Math.abs(count));
+    }
+  };
+  const handleDoneAllocating = () => {
+    if (storeState) dismissWaterAllocation();
+  };
 
   return (
     <div className="grain" style={{ width: "100vw", height: "100vh", display: "flex",
@@ -1300,7 +1580,17 @@ export default function GameTable() {
         </div>
 
         {/* CENTER — Player board */}
-        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
+
+          {/* ── Water Allocation Modal ── */}
+          {waterAllocationEffect && storeState && (
+            <WaterAllocationModal
+              state={state}
+              waterSupply={state.sharedBoard.waterSupply}
+              onAllocate={handleAllocateWater}
+              onDone={handleDoneAllocating}
+            />
+          )}
 
           {/* Player switcher tabs */}
           <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--b0)",
