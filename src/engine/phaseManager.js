@@ -23,15 +23,32 @@ import { applyTrackDelta } from './trackManager.js';
 
 /**
  * Enter the EVENT phase: reveal and resolve the top event card.
+ * Events are skipped for rounds 1–2 so players can build their tableaus first.
  */
+const FIRST_EVENT_ROUND = 3;
+
 function enterEventPhase(state, rollFn) {
+  const phaseStart = { type: 'phase_start', phase: PHASES.EVENT, round: state.round,
+    message: `Round ${state.round} — Event Phase` };
+
+  if (state.round < FIRST_EVENT_ROUND) {
+    // No event this round — players need time to build tableaus
+    return {
+      ...emptyUpdate(),
+      logEntries: [
+        phaseStart,
+        { type: 'event_skipped', round: state.round,
+          message: `Round ${state.round} — No event (events begin round ${FIRST_EVENT_ROUND})` },
+      ],
+    };
+  }
+
   const update = resolveEventPhase(state, rollFn);
   return {
     ...update,
     sharedPatches: { ...update.sharedPatches },
     logEntries: [
-      { type: 'phase_start', phase: PHASES.EVENT, round: state.round,
-        message: `Round ${state.round} — Event Phase` },
+      phaseStart,
       ...update.logEntries,
     ],
   };

@@ -1707,9 +1707,9 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
     return (
       <Modal
         title={`Protest — ${effect.protestId?.replace(/_/g, ' ')}`}
-        subtitle="All players may activate activists. Player with lowest influence loses.">
+        subtitle="Activating activists is optional. Player(s) with lowest influence lose.">
         <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 12 }}>
-          Current influence (activists were played earlier this round):
+          Protest influence accumulated this round (0 if no activists played):
         </div>
         {state.playerOrder.map(pid => {
           const p  = state.players[pid];
@@ -1730,12 +1730,13 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
           );
         })}
         <div className="f-mono" style={{
-          fontSize: 9, color: 'var(--terra-dim)',
+          fontSize: 9, color: 'var(--t4)',
           marginTop: 12, padding: '6px 10px',
-          border: '1px solid var(--terra-dim)', borderRadius: 2, lineHeight: 1.5,
+          border: '1px solid var(--b2)', borderRadius: 2, lineHeight: 1.6,
         }}>
-          ⚠ Once you click Resolve, the player(s) with the lowest influence receive penalties.
-          Make sure all activists have been played first.
+          Activist activation is optional — you may resolve immediately if no one
+          wishes to play activists (or none are available). All players tied at the
+          lowest influence share the penalty.
         </div>
         <ConfirmBtn
           label="Resolve Protest"
