@@ -1404,7 +1404,7 @@ function SharedBoardPanel({
  *   rider_coattails_case       — pick a won SC case from the docket
  *   negate_card_or_lawyer      — pick any card/lawyer in play to negate
  */
-function ChoiceResolutionModal({ effect, state, onResolve }) {
+function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
   const [selA, setSelA] = useState(null);
   const [selB, setSelB] = useState(null);
 
@@ -1709,17 +1709,71 @@ function ChoiceResolutionModal({ effect, state, onResolve }) {
           );
         })}
         {allLawyers.length === 0 && (
-          <div className="f-mono" style={{ fontSize: 10, color: 'var(--t4)' }}>No lawyers in play.</div>
+          <>
+            <div className="f-mono" style={{
+              fontSize: 10, color: 'var(--t4)', marginBottom: 10,
+            }}>
+              No lawyers in play — the card has no valid targets.
+            </div>
+            <div className="f-mono" style={{
+              fontSize: 9, lineHeight: 1.5, color: 'var(--terra-dim)',
+              padding: '6px 10px',
+              border: '1px solid var(--terra-dim)',
+              borderRadius: 2, marginBottom: 4,
+            }}>
+              <strong style={{ color: 'var(--terra)' }}>Undo Card Play</strong> — restores state
+              to before the card was played. The strategy card returns to your hand.
+              <br />
+              <strong style={{ color: 'var(--t3)' }}>Dismiss</strong> — the card effect fizzles.
+              The card stays exhausted and is discarded at cleanup.
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <button
+                onClick={onUndo}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--terra)22'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                style={{
+                  flex: 1, padding: '6px 0',
+                  background: 'transparent',
+                  border: '1px solid var(--terra)',
+                  borderRadius: 2,
+                  color: 'var(--terra)',
+                  fontFamily: "'Courier Prime', monospace",
+                  fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}>
+                ↩ Undo Card Play
+              </button>
+              <button
+                onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId, targetInstanceIds: [] })}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--b2)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                style={{
+                  flex: 1, padding: '6px 0',
+                  background: 'transparent',
+                  border: '1px solid var(--b2)',
+                  borderRadius: 2,
+                  color: 'var(--t3)',
+                  fontFamily: "'Courier Prime', monospace",
+                  fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}>
+                Dismiss (fizzle)
+              </button>
+            </div>
+          </>
         )}
-        <ConfirmBtn
-          label="Lock These Lawyers"
-          disabled={!selA || !selB}
-          onClick={() => onResolve({
-            subtype: effect.subtype,
-            playerId: effect.playerId,
-            targetInstanceIds: [selA, selB],
-          })}
-        />
+        {allLawyers.length > 0 && (
+          <ConfirmBtn
+            label="Lock These Lawyers"
+            disabled={!selA || !selB}
+            onClick={() => onResolve({
+              subtype: effect.subtype,
+              playerId: effect.playerId,
+              targetInstanceIds: [selA, selB],
+            })}
+          />
+        )}
       </Modal>
     );
   }
@@ -2342,6 +2396,8 @@ export default function GameTable() {
   const resolveChoice              = useGameStore(s => s.resolveChoice);
   const acquireLawyer              = useGameStore(s => s.acquireLawyer);
   const acquireActivist            = useGameStore(s => s.acquireActivist);
+  const undo                       = useGameStore(s => s.undo);
+  const dismissChoiceEffect        = useGameStore(s => s.dismissChoiceEffect);
 
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
@@ -2429,6 +2485,14 @@ export default function GameTable() {
     if (storeState && activePlayer) acquireActivist(activePlayer.id, marketIndex);
   };
 
+  // Undo a card play from inside a choice modal (undo game state + clear the
+  // pending effect, which lives outside gameState on the store top-level)
+  const handleUndoChoiceCard = () => {
+    if (!storeState) return;
+    undo();
+    if (activeChoiceEffect) dismissChoiceEffect(activeChoiceEffect.subtype);
+  };
+
   return (
     <div className="grain" style={{ width: "100vw", height: "100vh", display: "flex",
         flexDirection: "column", background: "var(--bg0)", overflow: "hidden", position: "relative" }}>
@@ -2478,6 +2542,7 @@ export default function GameTable() {
               effect={activeChoiceEffect}
               state={state}
               onResolve={handleResolveChoice}
+              onUndo={handleUndoChoiceCard}
             />
           )}
 

@@ -721,6 +721,21 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
+   * Dismiss a specific choice_required pendingEffect by subtype.
+   * Used when:
+   *   (a) the effect fizzles (no valid targets), or
+   *   (b) the undo action restores gameState — pendingEffects live outside
+   *       gameState on the store top-level, so they must be cleared separately.
+   */
+  dismissChoiceEffect(subtype) {
+    set(s => ({
+      pendingEffects: s.pendingEffects.filter(
+        e => !(e.type === 'choice_required' && e.subtype === subtype)
+      ),
+    }));
+  },
+
+  /**
    * Dismiss the water_allocation pendingEffect — called when the player
    * clicks "Done Allocating".  Unblocks the Advance button.
    */
