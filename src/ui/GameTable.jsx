@@ -287,6 +287,26 @@ const CARD_COLORS = {
   citizen: "var(--citizen)", strategy: "var(--strategy)",
   event: "var(--event)", sc_case: "var(--gold)",
 };
+
+// ── Lawyer cost helpers (mirrors trackManager.js logic) ─────────────────────
+const PR_FREE_THRESHOLDS = [-7, 8];  // PR values that waive the $4 surcharge
+const LAWYER_SURCHARGE   = 4;
+
+function uiLawyerCost(cardDef, currentPr, pendingDiscount = 0) {
+  if (!cardDef) return 0;
+  const atThreshold = PR_FREE_THRESHOLDS.includes(currentPr);
+  const base = cardDef.cost + (atThreshold ? 0 : LAWYER_SURCHARGE);
+  return Math.max(0, base - pendingDiscount);
+}
+
+function uiCanAcquireWithPr(cardDef, currentPr) {
+  if (!cardDef?.pr_requirement) return true;
+  const { operator, value } = cardDef.pr_requirement;
+  if (operator === 'lte') return currentPr <= value;
+  if (operator === 'gte') return currentPr >= value;
+  return true;
+}
+
 const FACTION_COLORS = {
   arizona: "#c4612a", california: "#3d8fa8", nevada: "#c8a550",
   chemehuevi: "#7eb87e", fort_mohave: "#a07ec8", quechan: "#c86060",
@@ -530,7 +550,23 @@ function CardFace({
 // MARKET GRID (lawyer / activist)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MarketGrid({ slots, label, deckCount }) {
+/**
+ * MarketGrid
+ *
+ * Interactive props (only when a player is active in an action phase):
+ *   isActivePlayer  boolean
+ *   phase           string
+ *   marketType      'lawyer' | 'activist'
+ *   activePlayer    full player state (for PR, money, partnerships, pendingLawyerDiscount)
+ *   onAcquire       fn(marketIndex)
+ */
+function MarketGrid({
+  slots, label, deckCount,
+  isActivePlayer = false, phase, marketType, activePlayer, onAcquire,
+}) {
+  const inActionPhase = phase === 'action_n' || phase === 'action_c';
+  const showButtons   = isActivePlayer && inActionPhase && !!activePlayer;
+
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
@@ -540,15 +576,73 @@ function MarketGrid({ slots, label, deckCount }) {
         </span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-        {slots.map((cardId, i) =>
-          cardId ? (
-            <CardFace key={i} cardId={cardId} width="100%" />
-          ) : (
-            <div key={i} className="market-empty" style={{ height: 72, borderRadius: 3, fontSize: 10 }}>
-              Empty
+        {slots.map((cardId, i) => {
+          if (!cardId) {
+            return (
+              <div key={i} className="market-empty" style={{ height: 72, borderRadius: 3, fontSize: 10 }}>
+                Empty
+              </div>
+            );
+          }
+
+          let canAcquire = false;
+          let cost       = 0;
+          let reason     = '';
+
+          if (showButtons && marketType === 'lawyer') {
+            const cardDef = CARD_INDEX[cardId];
+            const pr      = activePlayer.prTrack?.value ?? 0;
+            const money   = activePlayer.moneyTrack?.value ?? 0;
+            const disc    = activePlayer.pendingLawyerDiscount ?? 0;
+            cost = uiLawyerCost(cardDef, pr, disc);
+            const prOk = uiCanAcquireWithPr(cardDef, pr);
+            if (!prOk)             { reason = 'PR req not met'; }
+            else if (money < cost) { reason = `Need $${cost}`; }
+            else                   { canAcquire = true; }
+          }
+
+          if (showButtons && marketType === 'activist') {
+            const hasBusiness = activePlayer.partnerships?.business;
+            const money       = activePlayer.moneyTrack?.value ?? 0;
+            cost = 3;
+            if (!hasBusiness)      { reason = 'Need Business'; }
+            else if (money < cost) { reason = `Need $${cost}`; }
+            else                   { canAcquire = true; }
+          }
+
+          const accentColor = marketType === 'lawyer' ? 'var(--lawyer)' : 'var(--activist)';
+
+          return (
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <CardFace cardId={cardId} width="100%" />
+              {showButtons && (
+                <button
+                  disabled={!canAcquire}
+                  onClick={() => canAcquire && onAcquire?.(i)}
+                  title={canAcquire ? `Acquire for $${cost}` : reason || `$${cost}`}
+                  onMouseEnter={e => { if (canAcquire) e.currentTarget.style.background = accentColor + '22'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  style={{
+                    background:    'transparent',
+                    border:        `1px solid ${canAcquire ? accentColor : 'var(--b1)'}`,
+                    borderRadius:  2,
+                    color:         canAcquire ? accentColor : 'var(--t4)',
+                    fontFamily:    "'Courier Prime', monospace",
+                    fontSize:      8,
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    padding:       '2px 0',
+                    width:         '100%',
+                    cursor:        canAcquire ? 'pointer' : 'not-allowed',
+                    opacity:       canAcquire ? 1 : 0.45,
+                    transition:    'all 0.12s',
+                  }}>
+                  {canAcquire ? `Acquire  $${cost}` : reason || `$${cost}`}
+                </button>
+              )}
             </div>
-          )
-        )}
+          );
+        })}
       </div>
     </div>
   );
@@ -1219,7 +1313,11 @@ function ActionLog({ log, pendingEffects }) {
 // SHARED BOARD PANEL  (left)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SharedBoardPanel({ sharedBoard, playerOrder, players }) {
+function SharedBoardPanel({
+  sharedBoard, playerOrder, players,
+  isActivePlayer = false, phase, activePlayer,
+  onAcquireLawyer, onAcquireActivist,
+}) {
   const { lawyerMarket, lawyerDeck, activistMarket, activistDeck,
           eventDeck, strategyDeck, strategyDiscard, docket } = sharedBoard;
 
@@ -1229,9 +1327,17 @@ function SharedBoardPanel({ sharedBoard, playerOrder, players }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0, height: "100%", overflowY: "auto", padding: "12px 10px" }}>
 
-      <MarketGrid label="Lawyer Market" slots={lawyerMarket} deckCount={lawyerDeck.length} />
+      <MarketGrid
+        label="Lawyer Market" slots={lawyerMarket} deckCount={lawyerDeck.length}
+        isActivePlayer={isActivePlayer} phase={phase} marketType="lawyer"
+        activePlayer={activePlayer} onAcquire={onAcquireLawyer}
+      />
       <Divider />
-      <MarketGrid label="Activist Market" slots={activistMarket} deckCount={activistDeck.length} />
+      <MarketGrid
+        label="Activist Market" slots={activistMarket} deckCount={activistDeck.length}
+        isActivePlayer={isActivePlayer} phase={phase} marketType="activist"
+        activePlayer={activePlayer} onAcquire={onAcquireActivist}
+      />
       <Divider />
       <DocketQueue docket={docket} playerOrder={playerOrder} players={players} />
       <Divider />
@@ -2234,6 +2340,8 @@ export default function GameTable() {
   const withdrawFromWaterBank      = useGameStore(s => s.withdrawFromWaterBank);
   const placeScInfluence           = useGameStore(s => s.placeScInfluence);
   const resolveChoice              = useGameStore(s => s.resolveChoice);
+  const acquireLawyer              = useGameStore(s => s.acquireLawyer);
+  const acquireActivist            = useGameStore(s => s.acquireActivist);
 
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
@@ -2313,6 +2421,14 @@ export default function GameTable() {
     if (storeState) resolveChoice(choiceData);
   };
 
+  // Market acquisition handlers
+  const handleAcquireLawyer = (marketIndex) => {
+    if (storeState && activePlayer) acquireLawyer(activePlayer.id, marketIndex);
+  };
+  const handleAcquireActivist = (marketIndex) => {
+    if (storeState && activePlayer) acquireActivist(activePlayer.id, marketIndex);
+  };
+
   return (
     <div className="grain" style={{ width: "100vw", height: "100vh", display: "flex",
         flexDirection: "column", background: "var(--bg0)", overflow: "hidden", position: "relative" }}>
@@ -2345,6 +2461,11 @@ export default function GameTable() {
             sharedBoard={state.sharedBoard}
             playerOrder={state.playerOrder}
             players={state.players}
+            isActivePlayer={safeViewedId === activeId}
+            phase={state.phase}
+            activePlayer={activePlayer}
+            onAcquireLawyer={handleAcquireLawyer}
+            onAcquireActivist={handleAcquireActivist}
           />
         </div>
 
