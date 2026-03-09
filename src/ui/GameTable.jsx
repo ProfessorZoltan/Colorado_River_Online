@@ -1032,6 +1032,20 @@ function PlayerBoard({
         <div style={{ width: 10, height: 10, borderRadius: 1, background: fColor, flexShrink: 0 }} />
         <span className="f-display" style={{ fontSize: 15, color: "var(--t1)", letterSpacing: "0.05em" }}>{player.name}</span>
         <span className="f-mono" style={{ fontSize: 10, color: "var(--vp)", marginLeft: 4 }}>{player.vp} VP</span>
+        {(player.protestInfluence ?? 0) > 0 && (
+          <span className="f-mono" title="Protest influence this round"
+            style={{ fontSize: 9, color: "var(--activist)", padding: "1px 5px",
+              border: "1px solid var(--activist)", borderRadius: 2 }}>
+            ✊{player.protestInfluence}
+          </span>
+        )}
+        {player.workaholicActive && (
+          <span className="f-mono" title="Workaholic active — next +1 water becomes +2"
+            style={{ fontSize: 9, color: "var(--water)", padding: "1px 5px",
+              border: "1px solid var(--water)", borderRadius: 2 }}>
+            ⚡×2💧
+          </span>
+        )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 11 }}>💧</span>
           <span className="f-mono" style={{ fontSize: 13, color: "var(--water)" }}>{player.waterCubes}</span>
@@ -1980,6 +1994,95 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
             targetInstanceId: selA || null,
           })}
         />
+      </Modal>
+    );
+  }
+
+  // ── activist_a_water_direction ──────────────────────────────────────────
+  if (effect.subtype === 'activist_a_water_direction') {
+    return (
+      <Modal
+        title="Activist A — Water Claim"
+        subtitle={`${player?.name} — Gain or Lose 1 water claim?`}>
+        <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+          <button
+            onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId,
+              cardId: effect.cardId, direction: 1 })}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--water)22'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            style={{
+              flex: 1, padding: '10px 0',
+              background: 'transparent', border: '1px solid var(--water)',
+              borderRadius: 2, color: 'var(--water)',
+              fontFamily: "'Courier Prime', monospace",
+              fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}>
+            ▲ Gain 1
+          </button>
+          <button
+            onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId,
+              cardId: effect.cardId, direction: -1 })}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--terra)22'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            style={{
+              flex: 1, padding: '10px 0',
+              background: 'transparent', border: '1px solid var(--terra)',
+              borderRadius: 2, color: 'var(--terra)',
+              fontFamily: "'Courier Prime', monospace",
+              fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}>
+            ▼ Lose 1
+          </button>
+        </div>
+      </Modal>
+    );
+  }
+
+  // ── card_alternative_choice ───────────────────────────────────────────────
+  if (effect.subtype === 'card_alternative_choice') {
+    const cardDef = CARD_INDEX[effect.cardId];
+    const primary = effect.primary;
+    const alts    = effect.alternatives ?? [];
+    const opts    = [
+      { idx: 0, text: primary.text, label: 'Primary effect' },
+      ...alts.map((a, i) => ({ idx: i + 1, text: a.text, label: `Alternative ${i + 1}` })),
+    ];
+    return (
+      <Modal
+        title={`${cardDef?.name || effect.cardId} — Choose Effect`}
+        subtitle={`${player?.name} — ${effect.side} action`}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          {opts.map(opt => (
+            <button
+              key={opt.idx}
+              onClick={() => onResolve({
+                subtype: effect.subtype,
+                playerId: effect.playerId,
+                cardId: effect.cardId,
+                side: effect.side,
+                alternativeIdx: opt.idx,
+              })}
+              onMouseEnter={e => { e.currentTarget.style.background = fColor + '18'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+              style={{
+                width: '100%', padding: '9px 14px', textAlign: 'left',
+                background: 'transparent',
+                border: `1px solid ${opt.idx === 0 ? fColor : 'var(--b2)'}`,
+                borderRadius: 2,
+                color: opt.idx === 0 ? 'var(--t1)' : 'var(--t2)',
+                fontFamily: "'Courier Prime', monospace",
+                cursor: 'pointer', transition: 'all 0.15s',
+              }}>
+              <div style={{ fontSize: 8, color: opt.idx === 0 ? fColor : 'var(--t4)',
+                  textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 3 }}>
+                {opt.label}
+              </div>
+              <div style={{ fontSize: 11, lineHeight: 1.4 }}>{opt.text}</div>
+            </button>
+          ))}
+        </div>
       </Modal>
     );
   }

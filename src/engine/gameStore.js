@@ -883,6 +883,24 @@ export const useGameStore = create((set, get) => ({
         }
         break;
 
+      case 'activist_a_water_direction':
+        // choiceData.direction: 1 (gain) or -1 (lose)
+        update = resolveCardAction(
+          gameState, choiceData.playerId, choiceData.cardId, 'N',
+          { delta: choiceData.direction }
+        );
+        consumed = true;
+        break;
+
+      case 'card_alternative_choice':
+        // choiceData.alternativeIdx: 0 = primary, 1+ = alternatives[idx-1]
+        update = resolveCardAction(
+          gameState, choiceData.playerId, choiceData.cardId, choiceData.side,
+          { alternativeIdx: choiceData.alternativeIdx }
+        );
+        consumed = true;
+        break;
+
       default:
         console.warn(`resolveChoice: unhandled subtype "${subtype}"`);
     }

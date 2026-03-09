@@ -96,9 +96,16 @@ function applyResourceDelta(state, playerId, resource, amount, reason) {
   const update = emptyUpdate();
 
   if (resource === RESOURCES.WATER || resource === 'water') {
+    // Workaholic C passive: if active and gaining exactly 1 cube, gain 2 instead
+    let effectiveAmount = amount;
+    let extraPatch = {};
+    if (amount === 1 && player.workaholicActive) {
+      effectiveAmount = 2;
+      extraPatch = { workaholicActive: false };
+    }
     const { playerPatch, logEntries, pendingEffects } =
-      applyWaterCubeDelta(player, amount, reason);
-    return playerUpdate(playerId, playerPatch, logEntries, pendingEffects);
+      applyWaterCubeDelta(player, effectiveAmount, reason);
+    return playerUpdate(playerId, { ...playerPatch, ...extraPatch }, logEntries, pendingEffects);
   }
 
   if (resource === RESOURCES.VP || resource === 'vp') {
@@ -649,18 +656,54 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
   }
 
   // ── Resolve the effect ────────────────────────────────────────────────────
-  const icon = action.icon;
+
+  // If card has alternatives and player hasn't chosen, ask before resolving.
+  if (action.alternatives?.length > 0 && options.alternativeIdx === undefined) {
+    return mergeUpdates(update, {
+      ...emptyUpdate(),
+      pendingEffects: [{
+        type:         'choice_required',
+        subtype:      'card_alternative_choice',
+        playerId,
+        cardId,
+        side,
+        primary:      { icon: action.icon, text: action.text },
+        alternatives: action.alternatives,
+        message: `${state.players[playerId].name} must choose an effect for ${cardDef.name} ${side}`,
+      }],
+    });
+  }
+
+  // Route to primary or chosen alternative
+  const resolvedAction = (options.alternativeIdx > 0)
+    ? { ...action, ...action.alternatives[options.alternativeIdx - 1] }
+    : action;
+  const resolvedIcon = resolvedAction.icon;
+
   let effectUpdate = emptyUpdate();
 
-  switch (icon) {
+  switch (resolvedIcon) {
     case 'water_claim':
-      // Gain or Lose water_claim (Activist A N: "Gain or Lose 1 water claim cube")
-      // Options must specify direction
-      effectUpdate = applyResourceDelta(
-        state, playerId, RESOURCES.WATER_CLAIM,
-        options.delta ?? 1,
-        `${cardDef.name} ${side} action`
-      );
+      // activist_a N: 'Gain or Lose 1' — player must pick direction.
+      // Other water_claim cards always gain (options.delta defaults to +1).
+      if (resolvedAction.text?.toLowerCase().includes('or lose') && options.delta === undefined) {
+        effectUpdate = {
+          ...emptyUpdate(),
+          pendingEffects: [{
+            type:    'choice_required',
+            subtype: 'activist_a_water_direction',
+            playerId,
+            cardId,
+            message: `${state.players[playerId].name}: Gain or Lose 1 water claim?`,
+          }],
+        };
+      } else {
+        effectUpdate = applyResourceDelta(
+          state, playerId, RESOURCES.WATER_CLAIM,
+          options.delta ?? 1,
+          `${cardDef.name} ${side} action`
+        );
+      }
       break;
 
     case 'water_claim_track':
@@ -698,7 +741,7 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
     case 'sc_influence':
       effectUpdate = resolveScInfluence(
         state, playerId,
-        options.amount ?? action.text?.match(/(\d+) SC/)?.[1] ?? 1,
+        options.amount ?? resolvedAction.text?.match(/(\d+) SC/)?.[1] ?? 1,
         options.caseId
       );
       break;
@@ -706,7 +749,7 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
     case 'protest_influence':
       effectUpdate = resolveProtestInfluence(
         state, playerId,
-        options.amount ?? parseInt(action.text?.match(/\+(\d+)/)?.[1] ?? '1', 10)
+        options.amount ?? parseInt(resolvedAction.text?.match(/\+(\d+)/)?.[1] ?? '1', 10)
       );
       break;
 
@@ -716,7 +759,7 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
       break;
 
     default:
-      console.warn(`effectResolver: unhandled icon "${icon}" on ${cardId} ${side}`);
+      console.warn(`effectResolver: unhandled icon "${resolvedIcon}" on ${cardId} ${side}`);
   }
 
   return mergeUpdates(update, effectUpdate);
@@ -750,10 +793,14 @@ function resolveTextDrivenEffect(state, playerId, cardId, side, action, options)
       break;
 
     case 'workaholic':
-      // Passive-like — "Gain 2 water cubes instead of 1 when you would gain 1"
-      // Resolved when a water gain is triggered — this is a modifier, not an active trigger.
-      // The UI should show this as a passive toggle.
-      return emptyUpdate();
+      // Sets a flag on player state. The next time this player gains exactly
+      // 1 water cube, applyResourceDelta checks the flag and gives 2 instead.
+      return mergeUpdates(update, playerUpdate(
+        playerId,
+        { workaholicActive: true },
+        [{ type: 'workaholic_active', playerId,
+           message: `${state.players[playerId].name} activates Workaholic — next +1 water becomes +2` }]
+      ));
 
     case 'rider_of_coattails':
       // N: "Gain the bonus of any of your lawyers activated this phase, if they cost more"

@@ -57,11 +57,6 @@ function enterActionPhase(state, phase) {
  * Enter WATER phase: compute water supply from water_claim tracks.
  * The water supply is the sum of all players' water_claim track values.
  * Each player then allocates water cubes to their projects.
- *
- * NOTE: The exact water supply formula (e.g. is it the sum? a shared pool?)
- * needs confirmation from the game rules. This implementation uses a shared pool
- * equal to the sum of all water_claim track positions as a placeholder.
- * Replace `computeWaterSupply` if the formula differs.
  */
 function enterWaterPhase(state) {
   const totalWaterClaims = state.playerOrder.reduce(
@@ -197,8 +192,9 @@ function enterCleanupPhase(state) {
 
     playerPatches[pid] = {
       tableau:          resetTableau,
-      protestInfluence: 0,
+      protestInfluence:     0,
       pendingLawyerDiscount: 0,
+      workaholicActive:     false,
     };
   }
 
