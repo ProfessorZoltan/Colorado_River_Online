@@ -1277,6 +1277,497 @@ function SharedBoardPanel({ sharedBoard, playerOrder, players }) {
 // ───────────────────────────────────────────────────────────────────────────────
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHOICE RESOLUTION MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ChoiceResolutionModal
+ *
+ * Renders the appropriate UI for whichever choice_required pendingEffect is
+ * currently active.  One effect is shown at a time (the first in the list).
+ *
+ * Supported subtypes:
+ *   activist_c_look_and_draw   — pick 1 of 2 strategy cards
+ *   docket_swap                — pick 2 docket positions to swap
+ *   water_bribe_target         — pick an opponent to receive water
+ *   protest_activation_round   — all players set protest influence, then resolve
+ *   red_herring_choose_lawyers — pick 2 lawyers (any tableau) to lock
+ *   rider_coattails_lawyer     — pick one of own lawyers activated this phase
+ *   rider_coattails_case       — pick a won SC case from the docket
+ *   negate_card_or_lawyer      — pick any card/lawyer in play to negate
+ */
+function ChoiceResolutionModal({ effect, state, onResolve }) {
+  const [selA, setSelA] = useState(null);
+  const [selB, setSelB] = useState(null);
+
+  if (!effect) return null;
+
+  const player = state.players[effect.playerId];
+  const fColor = FACTION_COLORS[player?.factionId] || 'var(--terra)';
+
+  // ── Shared chrome ──────────────────────────────────────────────────────────
+  function Modal({ title, subtitle, children }) {
+    return (
+      <div style={{
+        position: 'absolute', inset: 0, zIndex: 110,
+        background: 'rgba(13,11,8,0.88)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 24,
+      }}>
+        <div style={{
+          background: 'var(--bg2)', border: '1px solid var(--terra-dim)',
+          borderRadius: 4, width: '100%', maxWidth: 560,
+          maxHeight: '88vh', display: 'flex', flexDirection: 'column',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
+        }}>
+          <div style={{
+            padding: '14px 20px', borderBottom: '1px solid var(--b1)',
+            display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+          }}>
+            <div style={{ width: 7, height: 7, borderRadius: 1, background: fColor }} />
+            <div>
+              <div className="f-display" style={{ fontSize: 12, color: 'var(--terra)', letterSpacing: '0.06em' }}>
+                {title}
+              </div>
+              {subtitle && (
+                <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginTop: 2 }}>
+                  {subtitle}
+                </div>
+              )}
+            </div>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px' }}>
+            {children}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Shared confirm button
+  function ConfirmBtn({ label, disabled, onClick }) {
+    return (
+      <button
+        disabled={disabled}
+        onClick={onClick}
+        onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = 'var(--terra)'; e.currentTarget.style.color = '#fff'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = disabled ? 'var(--t4)' : 'var(--terra)'; }}
+        style={{
+          marginTop: 16, padding: '6px 20px',
+          background: 'none',
+          border: `1px solid ${disabled ? 'var(--b1)' : 'var(--terra)'}`,
+          borderRadius: 2,
+          color: disabled ? 'var(--t4)' : 'var(--terra)',
+          fontFamily: "'Courier Prime', monospace",
+          fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.45 : 1,
+          transition: 'all 0.15s',
+        }}>
+        {label}
+      </button>
+    );
+  }
+
+  // Shared selectable card chip
+  function CardChip({ cardId, instanceId, selected, onClick, extra }) {
+    const def = CARD_INDEX[cardId];
+    const typeColor = CARD_COLORS[def?.type] || 'var(--t2)';
+    return (
+      <div
+        onClick={onClick}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '7px 10px',
+          border: `1px solid ${selected ? 'var(--terra)' : 'var(--b2)'}`,
+          borderRadius: 2,
+          background: selected ? 'var(--bg4)' : 'var(--bg3)',
+          cursor: 'pointer', transition: 'all 0.12s',
+          marginBottom: 4,
+        }}>
+        <div style={{ width: 6, height: 6, borderRadius: 1, background: typeColor, flexShrink: 0 }} />
+        <span className="f-display" style={{ fontSize: 10, color: 'var(--t1)', flex: 1 }}>
+          {def?.name || cardId}
+        </span>
+        {extra && <span className="f-mono" style={{ fontSize: 9, color: 'var(--t3)' }}>{extra}</span>}
+        {selected && <span className="f-mono" style={{ fontSize: 9, color: 'var(--terra)' }}>✓</span>}
+      </div>
+    );
+  }
+
+  // ── activist_c_look_and_draw ──────────────────────────────────────────────
+  if (effect.subtype === 'activist_c_look_and_draw') {
+    const options = effect.options || [];
+    return (
+      <Modal
+        title="Activist C — Draw a Strategy Card"
+        subtitle={`${player?.name} — choose 1 card to draw, the other goes to the bottom`}>
+        <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 10 }}>
+          Top {options.length} of Strategy deck:
+        </div>
+        {options.map(cardId => (
+          <CardChip
+            key={cardId} cardId={cardId}
+            selected={selA === cardId}
+            onClick={() => setSelA(cardId)}
+          />
+        ))}
+        <ConfirmBtn
+          label="Draw Selected"
+          disabled={!selA}
+          onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId, chosenCardId: selA })}
+        />
+      </Modal>
+    );
+  }
+
+  // ── docket_swap ───────────────────────────────────────────────────────────
+  if (effect.subtype === 'docket_swap') {
+    const docket = effect.docket || state.sharedBoard.docket;
+    return (
+      <Modal
+        title="Donate to SC Justice — Swap Docket"
+        subtitle={`${player?.name} — select 2 cases to swap positions`}>
+        <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 10 }}>
+          {selA !== null && selB !== null
+            ? `Will swap position ${selA + 1} ↔ position ${selB + 1}`
+            : selA !== null
+              ? 'Now select the second case'
+              : 'Select the first case to move'}
+        </div>
+        {docket.map((caseId, idx) => {
+          const isSelA = selA === idx;
+          const isSelB = selB === idx;
+          return (
+            <div
+              key={`${caseId}-${idx}`}
+              onClick={() => {
+                if (selA === null) { setSelA(idx); }
+                else if (selB === null && idx !== selA) { setSelB(idx); }
+                else { setSelA(idx); setSelB(null); }
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '7px 10px', borderRadius: 2, marginBottom: 4, cursor: 'pointer',
+                border: `1px solid ${isSelA || isSelB ? 'var(--terra)' : 'var(--b2)'}`,
+                background: isSelA || isSelB ? 'var(--bg4)' : 'var(--bg3)',
+                transition: 'all 0.12s',
+              }}>
+              <span className="f-mono" style={{ fontSize: 10, color: 'var(--t4)', minWidth: 16 }}>
+                {isSelA ? 'A' : isSelB ? 'B' : `${idx + 1}.`}
+              </span>
+              <span className="f-display" style={{ fontSize: 10, color: 'var(--t1)', flex: 1 }}>
+                {CARD_INDEX[caseId]?.name || caseId}
+              </span>
+              {idx === 0 && <span className="f-mono" style={{ fontSize: 8, color: 'var(--terra)' }}>active</span>}
+            </div>
+          );
+        })}
+        <ConfirmBtn
+          label="Confirm Swap"
+          disabled={selA === null || selB === null}
+          onClick={() => onResolve({ subtype: effect.subtype, indexA: selA, indexB: selB })}
+        />
+      </Modal>
+    );
+  }
+
+  // ── water_bribe_target ────────────────────────────────────────────────────
+  if (effect.subtype === 'water_bribe_target') {
+    const opponents = state.playerOrder.filter(pid => pid !== effect.playerId);
+    return (
+      <Modal
+        title="Water Bribe — Choose Target"
+        subtitle={`${player?.name} — give 1 water cube to an opponent, receive $3`}>
+        <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 10 }}>
+          Select an opponent to receive the cube (they pay you $3):
+        </div>
+        {opponents.map(pid => {
+          const opp = state.players[pid];
+          const fC  = FACTION_COLORS[opp.factionId] || 'var(--t2)';
+          return (
+            <div
+              key={pid}
+              onClick={() => setSelA(pid)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '8px 12px', borderRadius: 2, marginBottom: 4, cursor: 'pointer',
+                border: `1px solid ${selA === pid ? 'var(--terra)' : 'var(--b2)'}`,
+                background: selA === pid ? 'var(--bg4)' : 'var(--bg3)',
+                transition: 'all 0.12s',
+              }}>
+              <div style={{ width: 7, height: 7, borderRadius: 1, background: fC }} />
+              <span className="f-body" style={{ fontSize: 12, color: 'var(--t1)', flex: 1 }}>{opp.name}</span>
+              <span className="f-mono" style={{ fontSize: 9, color: 'var(--water)' }}>{opp.waterCubes} 💧</span>
+              <span className="f-mono" style={{ fontSize: 9, color: 'var(--money)' }}>${opp.moneyTrack.value}</span>
+              {selA === pid && <span className="f-mono" style={{ fontSize: 9, color: 'var(--terra)' }}>✓</span>}
+            </div>
+          );
+        })}
+        <ConfirmBtn
+          label="Confirm Bribe"
+          disabled={!selA}
+          onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId, targetPlayerId: selA })}
+        />
+      </Modal>
+    );
+  }
+
+  // ── protest_activation_round ──────────────────────────────────────────────
+  if (effect.subtype === 'protest_activation_round') {
+    return (
+      <Modal
+        title={`Protest — ${effect.protestId?.replace(/_/g, ' ')}`}
+        subtitle="All players may activate activists. Player with lowest influence loses.">
+        <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 12 }}>
+          Current influence (activists were played earlier this round):
+        </div>
+        {state.playerOrder.map(pid => {
+          const p  = state.players[pid];
+          const fC = FACTION_COLORS[p.factionId] || 'var(--t2)';
+          return (
+            <div key={pid} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '7px 10px', borderRadius: 2, marginBottom: 4,
+              border: '1px solid var(--b1)', background: 'var(--bg3)',
+            }}>
+              <div style={{ width: 7, height: 7, borderRadius: 1, background: fC }} />
+              <span className="f-body" style={{ fontSize: 12, color: 'var(--t1)', flex: 1 }}>{p.name}</span>
+              <span className="f-mono" style={{ fontSize: 14, color: 'var(--pr-pos)', fontWeight: 700 }}>
+                {p.protestInfluence ?? 0}
+              </span>
+              <span className="f-mono" style={{ fontSize: 9, color: 'var(--t4)' }}>influence</span>
+            </div>
+          );
+        })}
+        <div className="f-mono" style={{
+          fontSize: 9, color: 'var(--terra-dim)',
+          marginTop: 12, padding: '6px 10px',
+          border: '1px solid var(--terra-dim)', borderRadius: 2, lineHeight: 1.5,
+        }}>
+          ⚠ Once you click Resolve, the player(s) with the lowest influence receive penalties.
+          Make sure all activists have been played first.
+        </div>
+        <ConfirmBtn
+          label="Resolve Protest"
+          disabled={false}
+          onClick={() => onResolve({ subtype: effect.subtype, protestId: effect.protestId })}
+        />
+      </Modal>
+    );
+  }
+
+  // ── red_herring_choose_lawyers ────────────────────────────────────────────
+  if (effect.subtype === 'red_herring_choose_lawyers') {
+    // Collect all lawyers across all tableaux
+    const allLawyers = [];
+    for (const pid of state.playerOrder) {
+      const p = state.players[pid];
+      for (const instance of p.tableau) {
+        const def = CARD_INDEX[instance.cardId];
+        if (def?.type === 'lawyer' && instance.exhaustState !== 'locked') {
+          allLawyers.push({ ...instance, ownerName: p.name, ownerFaction: p.factionId });
+        }
+      }
+    }
+    const selected = [selA, selB].filter(Boolean);
+    return (
+      <Modal
+        title="Red Herring Case — Lock 2 Lawyers"
+        subtitle={`${player?.name} — choose any 2 lawyers. They cannot be used this round.`}>
+        <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 10 }}>
+          {selected.length === 0 ? 'Select first lawyer to lock'
+            : selected.length === 1 ? 'Select second lawyer to lock'
+            : '2 lawyers selected — confirm when ready'}
+        </div>
+        {allLawyers.map(inst => {
+          const isSel = selA === inst.instanceId || selB === inst.instanceId;
+          const fC    = FACTION_COLORS[inst.ownerFaction] || 'var(--t2)';
+          return (
+            <CardChip
+              key={inst.instanceId}
+              cardId={inst.cardId}
+              instanceId={inst.instanceId}
+              selected={isSel}
+              extra={inst.ownerName}
+              onClick={() => {
+                if (isSel) {
+                  if (selA === inst.instanceId) setSelA(selB);
+                  setSelB(null);
+                } else if (!selA) { setSelA(inst.instanceId); }
+                else if (!selB)   { setSelB(inst.instanceId); }
+              }}
+            />
+          );
+        })}
+        {allLawyers.length === 0 && (
+          <div className="f-mono" style={{ fontSize: 10, color: 'var(--t4)' }}>No lawyers in play.</div>
+        )}
+        <ConfirmBtn
+          label="Lock These Lawyers"
+          disabled={!selA || !selB}
+          onClick={() => onResolve({
+            subtype: effect.subtype,
+            playerId: effect.playerId,
+            targetInstanceIds: [selA, selB],
+          })}
+        />
+      </Modal>
+    );
+  }
+
+  // ── rider_coattails_lawyer ────────────────────────────────────────────────
+  if (effect.subtype === 'rider_coattails_lawyer') {
+    // Own lawyers activated (exhausted or locked) this phase
+    const ownLawyers = (player?.tableau || []).filter(inst => {
+      const def = CARD_INDEX[inst.cardId];
+      return def?.type === 'lawyer' && inst.exhaustState === 'exhausted';
+    });
+    return (
+      <Modal
+        title="Rider of Coat-tails N — Copy a Lawyer Bonus"
+        subtitle={`${player?.name} — choose a lawyer you activated this phase to copy its bonus`}>
+        {ownLawyers.length === 0 && (
+          <div className="f-mono" style={{ fontSize: 10, color: 'var(--t4)', marginBottom: 8 }}>
+            No lawyers activated this phase. Effect has no valid target.
+          </div>
+        )}
+        {ownLawyers.map(inst => (
+          <CardChip
+            key={inst.instanceId}
+            cardId={inst.cardId}
+            selected={selA === inst.cardId}
+            onClick={() => setSelA(inst.cardId)}
+          />
+        ))}
+        <ConfirmBtn
+          label={ownLawyers.length === 0 ? 'Dismiss (no target)' : 'Copy Bonus'}
+          disabled={ownLawyers.length > 0 && !selA}
+          onClick={() => onResolve({
+            subtype: effect.subtype,
+            playerId: effect.playerId,
+            chosenCardId: selA || null,
+          })}
+        />
+      </Modal>
+    );
+  }
+
+  // ── rider_coattails_case ──────────────────────────────────────────────────
+  if (effect.subtype === 'rider_coattails_case') {
+    // Cases where the active player has no influence (not involved)
+    const docket = state.sharedBoard.docket || [];
+    const uninvolvedCases = docket.filter(caseId => {
+      const caseDef = CARD_INDEX[caseId];
+      if (!caseDef) return false;
+      const isPlaintiff = caseDef.plaintiff?.id === player?.factionId;
+      const isDefendant = caseDef.defendant?.id === player?.factionId;
+      return !isPlaintiff && !isDefendant;
+    });
+    return (
+      <Modal
+        title="Rider of Coat-tails C — Claim Case Bonus"
+        subtitle={`${player?.name} — choose a SC case won this round you were not involved in`}>
+        <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 10 }}>
+          Cases you are not party to:
+        </div>
+        {uninvolvedCases.length === 0 && (
+          <div className="f-mono" style={{ fontSize: 10, color: 'var(--t4)', marginBottom: 8 }}>
+            No eligible cases. Effect has no valid target.
+          </div>
+        )}
+        {uninvolvedCases.map(caseId => (
+          <div
+            key={caseId}
+            onClick={() => setSelA(caseId)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '7px 10px', borderRadius: 2, marginBottom: 4, cursor: 'pointer',
+              border: `1px solid ${selA === caseId ? 'var(--terra)' : 'var(--b2)'}`,
+              background: selA === caseId ? 'var(--bg4)' : 'var(--bg3)',
+              transition: 'all 0.12s',
+            }}>
+            <span style={{ fontSize: 11 }}>⚖</span>
+            <span className="f-display" style={{ fontSize: 10, color: 'var(--t1)', flex: 1 }}>
+              {CARD_INDEX[caseId]?.name || caseId}
+            </span>
+            {selA === caseId && <span className="f-mono" style={{ fontSize: 9, color: 'var(--terra)' }}>✓</span>}
+          </div>
+        ))}
+        <ConfirmBtn
+          label={uninvolvedCases.length === 0 ? 'Dismiss (no target)' : 'Claim Bonus'}
+          disabled={uninvolvedCases.length > 0 && !selA}
+          onClick={() => onResolve({
+            subtype: effect.subtype,
+            playerId: effect.playerId,
+            caseId: selA || null,
+          })}
+        />
+      </Modal>
+    );
+  }
+
+  // ── negate_card_or_lawyer ─────────────────────────────────────────────────
+  if (effect.subtype === 'negate_card_or_lawyer') {
+    // All cards in all tableaux that are exhausted (have been played this round)
+    const playedCards = [];
+    for (const pid of state.playerOrder) {
+      if (pid === effect.playerId) continue; // Can't negate own cards
+      const p = state.players[pid];
+      for (const inst of p.tableau) {
+        if (inst.exhaustState === 'exhausted') {
+          playedCards.push({ ...inst, ownerName: p.name, ownerFaction: p.factionId });
+        }
+      }
+    }
+    return (
+      <Modal
+        title="Protect Our Interests — Negate a Card"
+        subtitle={`${player?.name} — choose a card/lawyer used this round to negate its effect`}>
+        <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 10 }}>
+          Cards played by opponents this round (exhausted):
+        </div>
+        {playedCards.length === 0 && (
+          <div className="f-mono" style={{ fontSize: 10, color: 'var(--t4)', marginBottom: 8 }}>
+            No opponent cards played yet. You may dismiss.
+          </div>
+        )}
+        {playedCards.map(inst => (
+          <CardChip
+            key={inst.instanceId}
+            cardId={inst.cardId}
+            instanceId={inst.instanceId}
+            selected={selA === inst.instanceId}
+            extra={inst.ownerName}
+            onClick={() => setSelA(selA === inst.instanceId ? null : inst.instanceId)}
+          />
+        ))}
+        <ConfirmBtn
+          label={playedCards.length === 0 ? 'Dismiss (no target)' : 'Negate Effect'}
+          disabled={playedCards.length > 0 && !selA}
+          onClick={() => onResolve({
+            subtype: effect.subtype,
+            playerId: effect.playerId,
+            targetInstanceId: selA || null,
+          })}
+        />
+      </Modal>
+    );
+  }
+
+  // ── Fallback for unknown subtypes ─────────────────────────────────────────
+  return (
+    <Modal title="Pending Choice" subtitle={effect.subtype}>
+      <div className="f-body" style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 12 }}>
+        {effect.message}
+      </div>
+      <ConfirmBtn label="Dismiss" disabled={false} onClick={() => onResolve({ subtype: effect.subtype })} />
+    </Modal>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // WATER ALLOCATION MODAL
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1742,6 +2233,7 @@ export default function GameTable() {
   const depositToWaterBank         = useGameStore(s => s.depositToWaterBank);
   const withdrawFromWaterBank      = useGameStore(s => s.withdrawFromWaterBank);
   const placeScInfluence           = useGameStore(s => s.placeScInfluence);
+  const resolveChoice              = useGameStore(s => s.resolveChoice);
 
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
@@ -1815,6 +2307,12 @@ export default function GameTable() {
     if (storeState && activePlayer) placeScInfluence(activePlayer.id, caseId, amount);
   };
 
+  // Choice resolution
+  const activeChoiceEffect = pendingEffects.find(e => e.type === 'choice_required');
+  const handleResolveChoice = (choiceData) => {
+    if (storeState) resolveChoice(choiceData);
+  };
+
   return (
     <div className="grain" style={{ width: "100vw", height: "100vh", display: "flex",
         flexDirection: "column", background: "var(--bg0)", overflow: "hidden", position: "relative" }}>
@@ -1852,6 +2350,15 @@ export default function GameTable() {
 
         {/* CENTER — Player board */}
         <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
+
+          {/* ── Choice Resolution Modal ── */}
+          {activeChoiceEffect && storeState && (
+            <ChoiceResolutionModal
+              effect={activeChoiceEffect}
+              state={state}
+              onResolve={handleResolveChoice}
+            />
+          )}
 
           {/* ── Water Allocation Modal ── */}
           {waterAllocationEffect && storeState && (

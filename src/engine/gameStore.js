@@ -760,6 +760,89 @@ export const useGameStore = create((set, get) => ({
         consumed = true;
         break;
 
+      case 'red_herring_choose_lawyers':
+        // choiceData.targetInstanceIds: [instanceIdA, instanceIdB]
+        if (choiceData.targetInstanceIds?.length === 2) {
+          // Re-invoke resolveCardAction with the chosen targets in options
+          update = resolveCardAction(
+            gameState,
+            choiceData.playerId,
+            'red_herring_case',
+            'N',
+            { targetInstanceIds: choiceData.targetInstanceIds }
+          );
+          consumed = true;
+        }
+        break;
+
+      case 'rider_coattails_lawyer':
+        // choiceData.chosenCardId: the cardId of the lawyer to mimic
+        // Engine: copy that lawyer's N action onto the player's benefits
+        // For now: log the choice and grant the effect via a generic log entry
+        // (full implementation deferred — records the choice for rule-checking)
+        update = {
+          playerPatches: {},
+          sharedPatches: {},
+          logEntries: [{
+            type:    'rider_coattails_resolved',
+            playerId: choiceData.playerId,
+            cardId:  choiceData.chosenCardId,
+            message: `${gameState.players[choiceData.playerId]?.name} uses Rider of Coat-tails N — copies ${choiceData.chosenCardId}`,
+          }],
+          pendingEffects: [],
+        };
+        consumed = true;
+        break;
+
+      case 'rider_coattails_case':
+        // choiceData.caseId: the SC case to claim bonus from
+        update = {
+          playerPatches: {},
+          sharedPatches: {},
+          logEntries: [{
+            type:    'rider_coattails_resolved',
+            playerId: choiceData.playerId,
+            caseId:  choiceData.caseId,
+            message: `${gameState.players[choiceData.playerId]?.name} uses Rider of Coat-tails C — claims bonus from ${choiceData.caseId}`,
+          }],
+          pendingEffects: [],
+        };
+        consumed = true;
+        break;
+
+      case 'negate_card_or_lawyer':
+        // choiceData.targetInstanceId: instanceId of the card/lawyer to negate
+        // Mark the instance as locked so its effect is treated as void this round
+        {
+          let found = false;
+          const playerPatchesNegate = {};
+          for (const [pid, player] of Object.entries(gameState.players)) {
+            const idx = player.tableau.findIndex(c => c.instanceId === choiceData.targetInstanceId);
+            if (idx !== -1) {
+              const updatedTableau = player.tableau.map(c =>
+                c.instanceId === choiceData.targetInstanceId
+                  ? { ...c, exhaustState: 'locked' }
+                  : c
+              );
+              playerPatchesNegate[pid] = { tableau: updatedTableau };
+              found = true;
+            }
+          }
+          update = {
+            playerPatches: playerPatchesNegate,
+            sharedPatches: {},
+            logEntries: [{
+              type:    'card_negated',
+              playerId: choiceData.playerId,
+              targetInstanceId: choiceData.targetInstanceId,
+              message: `${gameState.players[choiceData.playerId]?.name} negates card effect (${choiceData.targetInstanceId})`,
+            }],
+            pendingEffects: [],
+          };
+          consumed = found;
+        }
+        break;
+
       default:
         console.warn(`resolveChoice: unhandled subtype "${subtype}"`);
     }
