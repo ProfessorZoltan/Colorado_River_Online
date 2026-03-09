@@ -635,8 +635,10 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
     };
   }
 
-  // ── Payment first ─────────────────────────────────────────────────────────
-  const payResult = applyPayments(state, playerId, action.payment);
+  // ── Payment first (skipped when options.skipPayment is true) ──────────────
+  const payResult = options.skipPayment
+    ? { ok: true, update: emptyUpdate() }
+    : applyPayments(state, playerId, action.payment);
   if (!payResult.ok) {
     return {
       ...emptyUpdate(),

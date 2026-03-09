@@ -19,7 +19,7 @@ import { create } from 'zustand';
 import { buildInitialState }       from './setup.js';
 import { advancePhase, advancePlayerTurn, isActionPhase, processPendingSCResolution }
   from './phaseManager.js';
-import { resolveCardAction, commitDocketSwap, commitActivistCChoice,
+import { resolveCardAction, applyResourceDelta, commitDocketSwap, commitActivistCChoice,
          commitWaterBribe, resolveIncomePhase, emptyUpdate, mergeUpdates }
   from './effectResolver.js';
 import { commitProtestResolution }  from './eventHandler.js';
@@ -815,40 +815,68 @@ export const useGameStore = create((set, get) => ({
         }
         break;
 
-      case 'rider_coattails_lawyer':
-        // choiceData.chosenCardId: the cardId of the lawyer to mimic
-        // Engine: copy that lawyer's N action onto the player's benefits
-        // For now: log the choice and grant the effect via a generic log entry
-        // (full implementation deferred — records the choice for rule-checking)
-        update = {
-          playerPatches: {},
-          sharedPatches: {},
-          logEntries: [{
-            type:    'rider_coattails_resolved',
-            playerId: choiceData.playerId,
-            cardId:  choiceData.chosenCardId,
-            message: `${gameState.players[choiceData.playerId]?.name} uses Rider of Coat-tails N — copies ${choiceData.chosenCardId}`,
-          }],
-          pendingEffects: [],
-        };
+      case 'rider_coattails_lawyer': {
+        // Re-run the chosen lawyer's N action on behalf of the rider player,
+        // skipping payment (rider gains the reward, not the cost).
+        const { chosenCardId, playerId: rcPlayerId } = choiceData;
+        if (chosenCardId) {
+          const copiedDef  = gameState.cardIndex[chosenCardId];
+          const baseUpdate = resolveCardAction(
+            gameState, rcPlayerId, chosenCardId, 'N',
+            { skipPayment: true }
+          );
+          // Prepend a log entry naming the copy
+          update = mergeUpdates(
+            {
+              ...emptyUpdate(),
+              logEntries: [{
+                type:    'rider_coattails_resolved',
+                playerId: rcPlayerId,
+                cardId:  chosenCardId,
+                message: `${gameState.players[rcPlayerId]?.name} copies ${copiedDef?.name || chosenCardId} N via Rider of Coat-tails`,
+              }],
+            },
+            baseUpdate
+          );
+        } else {
+          // No valid target — just log the fizzle
+          update = { ...emptyUpdate(), logEntries: [{
+            type: 'rider_coattails_resolved', playerId: choiceData.playerId,
+            message: `${gameState.players[choiceData.playerId]?.name} Rider of Coat-tails N — no valid target, effect fizzles`,
+          }] };
+        }
         consumed = true;
         break;
+      }
 
-      case 'rider_coattails_case':
-        // choiceData.caseId: the SC case to claim bonus from
-        update = {
-          playerPatches: {},
-          sharedPatches: {},
-          logEntries: [{
+      case 'rider_coattails_case': {
+        // Apply the winner_reward of the chosen case to the rider player.
+        const { caseId: rcCaseId, playerId: rcPid } = choiceData;
+        if (rcCaseId) {
+          const caseDef = gameState.cardIndex[rcCaseId];
+          let rcUpdate  = { ...emptyUpdate(), logEntries: [{
             type:    'rider_coattails_resolved',
-            playerId: choiceData.playerId,
-            caseId:  choiceData.caseId,
-            message: `${gameState.players[choiceData.playerId]?.name} uses Rider of Coat-tails C — claims bonus from ${choiceData.caseId}`,
-          }],
-          pendingEffects: [],
-        };
+            playerId: rcPid,
+            caseId:  rcCaseId,
+            message: `${gameState.players[rcPid]?.name} claims ${caseDef?.name || rcCaseId} winner bonus via Rider of Coat-tails`,
+          }] };
+          for (const reward of (caseDef?.winner_reward ?? [])) {
+            rcUpdate = mergeUpdates(
+              rcUpdate,
+              applyResourceDelta(gameState, rcPid, reward.resource, reward.amount,
+                `Rider of Coat-tails: ${caseDef?.name} winner reward`)
+            );
+          }
+          update   = rcUpdate;
+        } else {
+          update = { ...emptyUpdate(), logEntries: [{
+            type: 'rider_coattails_resolved', playerId: choiceData.playerId,
+            message: `${gameState.players[choiceData.playerId]?.name} Rider of Coat-tails C — no valid target, effect fizzles`,
+          }] };
+        }
         consumed = true;
         break;
+      }
 
       case 'negate_card_or_lawyer':
         // choiceData.targetInstanceId: instanceId of the card/lawyer to negate

@@ -287,6 +287,7 @@ export function buildInitialState(playerConfigs, cards, playerBoardSchema, share
       activeEvent:  null,
       docket:       docketCaseIds,
       waterSupply:  0,   // Determined at start of WATER phase
+      casesResolvedThisRound: [], // [{caseId, winnerId}] — cleared each cleanup
     },
 
     activeFactionIds,

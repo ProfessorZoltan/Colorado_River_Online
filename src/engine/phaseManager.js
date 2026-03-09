@@ -209,7 +209,7 @@ function enterCleanupPhase(state) {
 
   return {
     playerPatches,
-    sharedPatches:    { waterSupply: 0 },
+    sharedPatches:    { waterSupply: 0, casesResolvedThisRound: [] },
     logEntries,
     pendingEffects:   isLastRound
       ? [{ type: 'game_over', message: 'Final round cleanup complete — trigger scoring' }]

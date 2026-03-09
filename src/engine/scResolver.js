@@ -108,7 +108,12 @@ export function resolveActiveSCCase(state) {
 
   // ── Docket: shift left, append resolved case to end ────────────────────
   const newDocket = [...docket.slice(1), caseId];
-  update.sharedPatches = { ...update.sharedPatches, docket: newDocket };
+  const prevResolved = state.sharedBoard.casesResolvedThisRound ?? [];
+  update.sharedPatches = {
+    ...update.sharedPatches,
+    docket: newDocket,
+    casesResolvedThisRound: [...prevResolved, { caseId, winnerId }],
+  };
 
   // ── Reset SC influence for this case (for the next time it cycles around) ─
   const influenceResets = {};

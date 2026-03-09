@@ -1861,10 +1861,14 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
 
   // ── rider_coattails_lawyer ────────────────────────────────────────────────
   if (effect.subtype === 'rider_coattails_lawyer') {
-    // Own lawyers activated (exhausted or locked) this phase
+    // Own lawyers activated this phase, whose cost > 1 (rider costs $1)
+    const riderCost = CARD_INDEX['rider_of_coattails']?.cost ?? 1;
     const ownLawyers = (player?.tableau || []).filter(inst => {
       const def = CARD_INDEX[inst.cardId];
-      return def?.type === 'lawyer' && inst.exhaustState === 'exhausted';
+      return def?.type === 'lawyer'
+        && inst.exhaustState === 'exhausted'
+        && (def.cost ?? 0) > riderCost
+        && def.actions?.N;  // must have an N action to copy
     });
     return (
       <Modal
@@ -1898,45 +1902,62 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
 
   // ── rider_coattails_case ──────────────────────────────────────────────────
   if (effect.subtype === 'rider_coattails_case') {
-    // Cases where the active player has no influence (not involved)
-    const docket = state.sharedBoard.docket || [];
-    const uninvolvedCases = docket.filter(caseId => {
-      const caseDef = CARD_INDEX[caseId];
-      if (!caseDef) return false;
-      const isPlaintiff = caseDef.plaintiff?.id === player?.factionId;
-      const isDefendant = caseDef.defendant?.id === player?.factionId;
-      return !isPlaintiff && !isDefendant;
-    });
+    // Cases resolved THIS ROUND where the active player was not a party
+    const resolvedThisRound = state.sharedBoard.casesResolvedThisRound ?? [];
+    const uninvolvedCases = resolvedThisRound
+      .map(r => r.caseId)
+      .filter(caseId => {
+        const caseDef = CARD_INDEX[caseId];
+        if (!caseDef) return false;
+        const isPlaintiff = caseDef.plaintiff?.id === player?.factionId;
+        const isDefendant = caseDef.defendant?.id === player?.factionId;
+        return !isPlaintiff && !isDefendant;
+      });
     return (
       <Modal
         title="Rider of Coat-tails C — Claim Case Bonus"
-        subtitle={`${player?.name} — choose a SC case won this round you were not involved in`}>
+        subtitle={`${player?.name} — SC cases resolved this round (not your party)`}>
         <div className="f-mono" style={{ fontSize: 9, color: 'var(--t3)', marginBottom: 10 }}>
-          Cases you are not party to:
+          Resolved this round — choose one to claim winner bonus:
         </div>
         {uninvolvedCases.length === 0 && (
           <div className="f-mono" style={{ fontSize: 10, color: 'var(--t4)', marginBottom: 8 }}>
-            No eligible cases. Effect has no valid target.
+            No SC cases were resolved this round (or all were cases you were party to).
           </div>
         )}
-        {uninvolvedCases.map(caseId => (
-          <div
-            key={caseId}
-            onClick={() => setSelA(caseId)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '7px 10px', borderRadius: 2, marginBottom: 4, cursor: 'pointer',
-              border: `1px solid ${selA === caseId ? 'var(--terra)' : 'var(--b2)'}`,
-              background: selA === caseId ? 'var(--bg4)' : 'var(--bg3)',
-              transition: 'all 0.12s',
-            }}>
-            <span style={{ fontSize: 11 }}>⚖</span>
-            <span className="f-display" style={{ fontSize: 10, color: 'var(--t1)', flex: 1 }}>
-              {CARD_INDEX[caseId]?.name || caseId}
-            </span>
-            {selA === caseId && <span className="f-mono" style={{ fontSize: 9, color: 'var(--terra)' }}>✓</span>}
-          </div>
-        ))}
+        {uninvolvedCases.map(caseId => {
+          const caseDef = CARD_INDEX[caseId];
+          const rewards = caseDef?.winner_reward ?? [];
+          const rewardStr = rewards.map(r => {
+            const icons = { water_claim_track: '◈', water_claim: '◈', vp: 'VP', pr: '★', money: '$', water: '💧' };
+            return `+${r.amount}${icons[r.resource] || r.resource}`;
+          }).join('  ');
+          return (
+            <div
+              key={caseId}
+              onClick={() => setSelA(caseId)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '7px 10px', borderRadius: 2, marginBottom: 4, cursor: 'pointer',
+                border: `1px solid ${selA === caseId ? 'var(--terra)' : 'var(--b2)'}`,
+                background: selA === caseId ? 'var(--bg4)' : 'var(--bg3)',
+                transition: 'all 0.12s',
+              }}>
+              <span style={{ fontSize: 11 }}>⚖</span>
+              <div style={{ flex: 1 }}>
+                <div className="f-display" style={{ fontSize: 10, color: 'var(--t1)' }}>
+                  {caseDef?.name || caseId}
+                </div>
+                {rewardStr && (
+                  <div className="f-mono" style={{ fontSize: 8, color: 'var(--gold)', marginTop: 2 }}>
+                    {rewardStr}
+                  </div>
+                )}
+              </div>
+              {selA === caseId && <span className="f-mono" style={{ fontSize: 9, color: 'var(--terra)' }}>✓</span>}
+            </div>
+          );
+        })}
         <ConfirmBtn
           label={uninvolvedCases.length === 0 ? 'Dismiss (no target)' : 'Claim Bonus'}
           disabled={uninvolvedCases.length > 0 && !selA}
