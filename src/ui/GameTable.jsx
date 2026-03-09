@@ -666,23 +666,81 @@ const PARTNERSHIP_DEFS = [
   { id: "investment", label: "Investment", icon: "📈", buyCost: 2, ability: "Pay $2 → Gain 1 PR" },
 ];
 
-function PartnershipsRow({ partnerships }) {
+/**
+ * PartnershipsRow
+ *
+ * Extra props for interactive mode:
+ *   isActivePlayer   boolean
+ *   money            number — player's current money (for affordability check)
+ *   onBuy            fn(partnershipId)
+ *   onUse            fn(partnershipId)
+ */
+function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, onBuy, onUse }) {
   return (
     <div>
       <Label>Partnerships</Label>
       <div style={{ display: "flex", gap: 5 }}>
         {PARTNERSHIP_DEFS.map((p) => {
-          const owned = partnerships[p.id];
+          const owned       = partnerships[p.id];
+          const canAffordBuy = money >= p.buyCost;
+          const canAffordUse = money >= p.buyCost; // ability cost = same value
+
           return (
             <div key={p.id} className={`p-badge ${owned ? "owned" : ""}`}
               style={{ flex: 1, padding: "6px 8px", borderRadius: 2, textAlign: "center" }}>
               <div style={{ fontSize: 14, marginBottom: 3 }}>{p.icon}</div>
-              <div className="f-display" style={{ fontSize: 8, color: owned ? "var(--gold)" : "var(--t3)", marginBottom: 2 }}>{p.label}</div>
-              <div className="f-mono" style={{ fontSize: 8, color: owned ? "var(--t2)" : "var(--t4)" }}>
+              <div className="f-display" style={{
+                fontSize: 8, marginBottom: 2,
+                color: owned ? "var(--gold)" : "var(--t3)",
+              }}>{p.label}</div>
+              <div className="f-mono" style={{ fontSize: 8, color: owned ? "var(--t2)" : "var(--t4)", marginBottom: 4 }}>
                 {owned ? p.ability : `Buy: $${p.buyCost}`}
               </div>
-              {!owned && (
-                <div style={{ marginTop: 4, fontSize: 8, color: "var(--t4)", fontFamily: "Courier Prime, monospace" }}>— unowned —</div>
+
+              {isActivePlayer && !owned && (
+                <button
+                  disabled={!canAffordBuy}
+                  onClick={() => onBuy?.(p.id)}
+                  onMouseEnter={e => { if (canAffordBuy) e.currentTarget.style.background = "var(--gold)22"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                  title={canAffordBuy ? `Buy ${p.label} for $${p.buyCost}` : `Need $${p.buyCost}`}
+                  style={{
+                    width: "100%", padding: "3px 0",
+                    background: "transparent",
+                    border: `1px solid ${canAffordBuy ? "var(--gold)" : "var(--b1)"}`,
+                    borderRadius: 2,
+                    color: canAffordBuy ? "var(--gold)" : "var(--t4)",
+                    fontFamily: "'Courier Prime', monospace", fontSize: 8,
+                    letterSpacing: "0.1em", textTransform: "uppercase",
+                    cursor: canAffordBuy ? "pointer" : "not-allowed",
+                    opacity: canAffordBuy ? 1 : 0.45,
+                    transition: "all 0.12s",
+                  }}>
+                  Buy
+                </button>
+              )}
+
+              {isActivePlayer && owned && (
+                <button
+                  disabled={!canAffordUse}
+                  onClick={() => onUse?.(p.id)}
+                  onMouseEnter={e => { if (canAffordUse) e.currentTarget.style.background = "var(--gold)22"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                  title={canAffordUse ? `Use ${p.label} ability ($${p.buyCost})` : `Need $${p.buyCost}`}
+                  style={{
+                    width: "100%", padding: "3px 0",
+                    background: "transparent",
+                    border: `1px solid ${canAffordUse ? "var(--gold-dim)" : "var(--b1)"}`,
+                    borderRadius: 2,
+                    color: canAffordUse ? "var(--gold)" : "var(--t4)",
+                    fontFamily: "'Courier Prime', monospace", fontSize: 8,
+                    letterSpacing: "0.1em", textTransform: "uppercase",
+                    cursor: canAffordUse ? "pointer" : "not-allowed",
+                    opacity: canAffordUse ? 1 : 0.45,
+                    transition: "all 0.12s",
+                  }}>
+                  Use
+                </button>
               )}
             </div>
           );
@@ -692,27 +750,125 @@ function PartnershipsRow({ partnerships }) {
   );
 }
 
-function WaterBankWidget({ waterBank }) {
+/**
+ * WaterBankWidget
+ *
+ * Extra props for interactive mode:
+ *   isActivePlayer   boolean — is the viewed player the active player?
+ *   player           object  — the full player state (for money + cubes)
+ *   allPlayers       object  — { [pid]: playerState } (to find other unlocked banks)
+ *   playerOrder      string[]
+ *   onUnlock         fn()
+ *   onDeposit        fn(ownerId, count)
+ *   onWithdraw       fn(count)
+ */
+function WaterBankWidget({
+  waterBank, isActivePlayer = false, player, allPlayers = {}, playerOrder = [],
+  onUnlock, onDeposit, onWithdraw,
+}) {
   const { unlocked, stored } = waterBank;
+  const canAffordUnlock = (player?.moneyTrack?.value ?? 0) >= 8;
+  const hasCubes        = (player?.waterCubes ?? 0) > 0;
+  const canWithdraw     = unlocked && stored > 0;
+
+  // Other players with unlocked banks this player could deposit into
+  const otherBanks = playerOrder
+    .filter(pid => pid !== player?.id && allPlayers[pid]?.waterBank?.unlocked)
+    .map(pid => allPlayers[pid]);
+
   return (
-    <div style={{ padding: "7px 10px", border: `1px solid ${unlocked ? "var(--water-dim)" : "var(--b0)"}`,
-        borderRadius: 2, background: unlocked ? "var(--bg3)" : "var(--bg2)", display: "flex", alignItems: "center", gap: 10 }}>
-      <span style={{ fontSize: 16 }}>🏦</span>
-      <div style={{ flex: 1 }}>
-        <div className="f-display" style={{ fontSize: 9, color: unlocked ? "var(--water)" : "var(--t4)", marginBottom: 2 }}>
-          Water Bank {unlocked ? "(Active)" : "(Locked — $8 to unlock)"}
-        </div>
-        {unlocked && (
-          <div style={{ display: "flex", gap: 3 }}>
-            {Array.from({ length: 9 }).map((_, i) => (
-              <div key={i} className={`wslot ${i < stored ? "on" : ""}`} style={{ width: 10, height: 10 }} />
-            ))}
-            <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", marginLeft: 4 }}>{stored}/9</span>
+    <div style={{
+      minWidth: 160, padding: "8px 10px",
+      border: `1px solid ${unlocked ? "var(--water-dim)" : "var(--b0)"}`,
+      borderRadius: 2, background: unlocked ? "var(--bg3)" : "var(--bg2)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: unlocked ? 6 : 0 }}>
+        <span style={{ fontSize: 14 }}>🏦</span>
+        <div style={{ flex: 1 }}>
+          <div className="f-display" style={{ fontSize: 9, color: unlocked ? "var(--water)" : "var(--t4)" }}>
+            Water Bank
           </div>
-        )}
+          <div className="f-mono" style={{ fontSize: 8, color: "var(--t4)" }}>
+            {unlocked ? `${stored}/9 stored` : "$8 to unlock"}
+          </div>
+        </div>
       </div>
+
+      {/* Slot dots */}
+      {unlocked && (
+        <div style={{ display: "flex", gap: 2, marginBottom: 6, flexWrap: "wrap" }}>
+          {Array.from({ length: 9 }).map((_, i) => (
+            <div key={i} className={`wslot ${i < stored ? "on" : ""}`} style={{ width: 10, height: 10 }} />
+          ))}
+        </div>
+      )}
+
+      {/* Buttons for active player */}
+      {isActivePlayer && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {!unlocked && (
+            <button
+              disabled={!canAffordUnlock}
+              onClick={onUnlock}
+              title={canAffordUnlock ? "Unlock your water bank for $8" : "Need $8 to unlock"}
+              onMouseEnter={e => { if (canAffordUnlock) e.currentTarget.style.background = "var(--water)22"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+              style={miniBtn(canAffordUnlock ? "var(--water)" : null)}>
+              Unlock ($8)
+            </button>
+          )}
+
+          {unlocked && canWithdraw && (
+            <button
+              onClick={() => onWithdraw?.(stored)}
+              title={`Withdraw all ${stored} cube(s) for free`}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--water)22"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+              style={miniBtn("var(--water-bright)")}>
+              Withdraw All
+            </button>
+          )}
+
+          {/* Deposit into OTHER players' banks */}
+          {otherBanks.map(owner => {
+            const space = 9 - owner.waterBank.stored;
+            const depositCount = Math.min(space, player?.waterCubes ?? 0);
+            const cost = depositCount * 1;
+            const canDeposit = depositCount > 0 && (player?.moneyTrack?.value ?? 0) >= cost && hasCubes;
+            return (
+              <button
+                key={owner.id}
+                disabled={!canDeposit}
+                onClick={() => canDeposit && onDeposit?.(owner.id, 1)}
+                title={canDeposit ? `Deposit 1 cube to ${owner.name}'s bank ($1)` : `Can't deposit`}
+                onMouseEnter={e => { if (canDeposit) e.currentTarget.style.background = "var(--water)11"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                style={miniBtn(canDeposit ? "var(--water-dim)" : null)}>
+                +1 → {owner.name.slice(0, 6)}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+/** Shared mini-button style for WaterBankWidget */
+function miniBtn(color) {
+  const c = color || "var(--b1)";
+  return {
+    width: "100%", padding: "2px 0",
+    background: "transparent",
+    border: `1px solid ${c}`,
+    borderRadius: 2, color: c,
+    fontFamily: "'Courier Prime', monospace",
+    fontSize: 8, letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    cursor: color ? "pointer" : "not-allowed",
+    opacity: color ? 1 : 0.4,
+    transition: "all 0.12s",
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -727,7 +883,31 @@ function WaterBankWidget({ waterBank }) {
  *   phase           string           — current game phase
  *   onPlayCard      fn(cardId, side) — fires when a tableau card play button is clicked
  */
-function PlayerBoard({ player, isActivePlayer = false, phase, onPlayCard }) {
+/**
+ * PlayerBoard
+ *
+ * Extra props for interactive mode:
+ *   isActivePlayer  boolean
+ *   phase           string
+ *   activeCaseId    string|null  — docket[0], for SC influence buttons
+ *   allPlayers      object       — full players map (for water bank deposits)
+ *   playerOrder     string[]
+ *   onPlayCard      fn(cardId, side)
+ *   onBuyPartnership   fn(partnershipId)
+ *   onUsePartnership   fn(partnershipId)
+ *   onUnlockBank       fn()
+ *   onDeposit          fn(ownerId, count)
+ *   onWithdraw         fn(count)
+ *   onPlaceScInfluence fn(caseId, amount)
+ */
+function PlayerBoard({
+  player, isActivePlayer = false, phase,
+  activeCaseId, allPlayers = {}, playerOrder = [],
+  onPlayCard,
+  onBuyPartnership, onUsePartnership,
+  onUnlockBank, onDeposit, onWithdraw,
+  onPlaceScInfluence,
+}) {
   const fColor  = FACTION_COLORS[player.factionId] || "var(--terra)";
   const prValue = player.prTrack?.value ?? 0;
 
@@ -765,9 +945,69 @@ function PlayerBoard({ player, isActivePlayer = false, phase, onPlayCard }) {
 
       {/* Partnerships + Bank */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "start" }}>
-        <PartnershipsRow partnerships={player.partnerships} />
-        <WaterBankWidget waterBank={player.waterBank} />
+        <PartnershipsRow
+          partnerships={player.partnerships}
+          isActivePlayer={isActivePlayer}
+          money={player.moneyTrack?.value ?? 0}
+          onBuy={onBuyPartnership}
+          onUse={onUsePartnership}
+        />
+        <WaterBankWidget
+          waterBank={player.waterBank}
+          isActivePlayer={isActivePlayer}
+          player={player}
+          allPlayers={allPlayers}
+          playerOrder={playerOrder}
+          onUnlock={onUnlockBank}
+          onDeposit={onDeposit}
+          onWithdraw={onWithdraw}
+        />
       </div>
+
+      {/* SC Influence — shown in action phases when there's an active case */}
+      {activeCaseId && isActivePlayer && (phase === "action_n" || phase === "action_c") && (
+        <>
+          <Divider />
+          <div>
+            <Label>SC Influence</Label>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "7px 10px",
+              border: "1px solid var(--b1)",
+              borderRadius: 2, background: "var(--bg3)",
+            }}>
+              <span style={{ fontSize: 11 }}>⚖</span>
+              <span className="f-body" style={{ fontSize: 11, color: "var(--t2)", flex: 1 }}>
+                {activeCaseId.replace(/_/g, " ")}
+              </span>
+              <span className="f-mono" style={{ fontSize: 12, color: "var(--gold)" }}>
+                {player.scInfluence?.[activeCaseId] ?? 0}
+              </span>
+              <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>influence</span>
+              <button
+                disabled={(player.waterCubes ?? 0) < 1}
+                onClick={() => onPlaceScInfluence?.(activeCaseId, 1)}
+                title="Place 1 SC influence (costs 1 water cube)"
+                onMouseEnter={e => { if ((player.waterCubes ?? 0) >= 1) e.currentTarget.style.background = "var(--gold)22"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${(player.waterCubes ?? 0) >= 1 ? "var(--gold)" : "var(--b1)"}`,
+                  borderRadius: 2,
+                  color: (player.waterCubes ?? 0) >= 1 ? "var(--gold)" : "var(--t4)",
+                  fontFamily: "'Courier Prime', monospace",
+                  fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+                  padding: "3px 10px",
+                  cursor: (player.waterCubes ?? 0) >= 1 ? "pointer" : "not-allowed",
+                  opacity: (player.waterCubes ?? 0) >= 1 ? 1 : 0.4,
+                  transition: "all 0.12s",
+                }}>
+                +1 (💧)
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       <Divider />
 
@@ -1496,6 +1736,12 @@ export default function GameTable() {
   const allocateWater              = useGameStore(s => s.allocateWater);
   const dismissWaterAllocation     = useGameStore(s => s.dismissWaterAllocation);
   const deallocateWater            = useGameStore(s => s.deallocateWater);
+  const purchasePartnership        = useGameStore(s => s.purchasePartnership);
+  const usePartnershipAbility      = useGameStore(s => s.usePartnershipAbility);
+  const unlockWaterBank            = useGameStore(s => s.unlockWaterBank);
+  const depositToWaterBank         = useGameStore(s => s.depositToWaterBank);
+  const withdrawFromWaterBank      = useGameStore(s => s.withdrawFromWaterBank);
+  const placeScInfluence           = useGameStore(s => s.placeScInfluence);
 
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
@@ -1542,6 +1788,31 @@ export default function GameTable() {
   };
   const handleDoneAllocating = () => {
     if (storeState) dismissWaterAllocation();
+  };
+
+  // Partnership handlers
+  const handleBuyPartnership = (partnershipId) => {
+    if (storeState && activePlayer) purchasePartnership(activePlayer.id, partnershipId);
+  };
+  const handleUsePartnership = (partnershipId) => {
+    if (storeState && activePlayer) usePartnershipAbility(activePlayer.id, partnershipId);
+  };
+
+  // Water bank handlers
+  const handleUnlockBank = () => {
+    if (storeState && activePlayer) unlockWaterBank(activePlayer.id);
+  };
+  const handleDeposit = (ownerId, count) => {
+    if (storeState && activePlayer) depositToWaterBank(activePlayer.id, ownerId, count);
+  };
+  const handleWithdraw = (count) => {
+    if (storeState && activePlayer) withdrawFromWaterBank(activePlayer.id, count);
+  };
+
+  // SC influence handler
+  const activeCaseId = state.sharedBoard?.docket?.[0] ?? null;
+  const handlePlaceScInfluence = (caseId, amount) => {
+    if (storeState && activePlayer) placeScInfluence(activePlayer.id, caseId, amount);
   };
 
   return (
@@ -1626,7 +1897,16 @@ export default function GameTable() {
               player={viewedPlayer}
               isActivePlayer={safeViewedId === activeId}
               phase={state.phase}
+              activeCaseId={activeCaseId}
+              allPlayers={state.players}
+              playerOrder={state.playerOrder}
               onPlayCard={handlePlayCard}
+              onBuyPartnership={handleBuyPartnership}
+              onUsePartnership={handleUsePartnership}
+              onUnlockBank={handleUnlockBank}
+              onDeposit={handleDeposit}
+              onWithdraw={handleWithdraw}
+              onPlaceScInfluence={handlePlaceScInfluence}
             />
           </div>
         </div>

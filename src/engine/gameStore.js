@@ -27,7 +27,7 @@ import { resolveActiveSCCase }      from './scResolver.js';
 import { calculateFinalScores }     from './vpCalculator.js';
 import { slideAndDraw, nextId }     from './utils.js';
 import { EXHAUST_STATES, CARD_TYPES, LAWYER_ACQUISITION_SURCHARGE, PHASES,
-         WATER_BANK, PARTNERSHIP_COSTS, MAX_ROUNDS }
+         WATER_BANK, PARTNERSHIP_COSTS, PARTNERSHIP_ABILITY_COSTS, MAX_ROUNDS }
   from './constants.js';
 import { lawyerAcquisitionCost, canAcquireWithPr, applyTrackDelta,
          applyWaterCubeDelta }
@@ -475,6 +475,207 @@ export const useGameStore = create((set, get) => ({
       logEntries: [{
         type: 'water_allocated', playerId, projectId, projectType, cubeCount: toAdd,
         message: `${player.name} allocates ${toAdd} water to ${projectId} (${current + toAdd}/${maxSlots})`,
+      }],
+      pendingEffects: [],
+    });
+  },
+
+  // ── Partnership ability use ──────────────────────────────────────────────────
+
+  /**
+   * Use a partnership ability:
+   *   law_firm   → Pay $4, triggers acquireLawyer flow (UI picks the market slot)
+   *   business   → Pay $3, triggers acquireActivist flow (UI picks the slot)
+   *   investment → Pay $2, gain 1 PR immediately
+   *
+   * For law_firm / business the money is deducted here; the card acquisition
+   * is handled by the existing acquireLawyer / acquireActivist actions driven
+   * by the UI.  For investment, the full effect resolves here.
+   */
+  usePartnershipAbility(playerId, partnershipId) {
+    const { gameState, _dispatch } = get();
+    const player = gameState.players[playerId];
+
+    if (!player.partnerships[partnershipId]) {
+      console.warn(`usePartnershipAbility: ${partnershipId} not owned`); return;
+    }
+
+    const abilityCost = PARTNERSHIP_ABILITY_COSTS[partnershipId];
+    if (!abilityCost) { console.warn(`usePartnershipAbility: unknown id ${partnershipId}`); return; }
+
+    if (player.moneyTrack.value < abilityCost.amount) {
+      console.warn(`usePartnershipAbility: insufficient money`); return;
+    }
+
+    // Deduct cost
+    const { playerPatch: moneyPatch, logEntries: moneyLog, pendingEffects: moneyFx } =
+      applyTrackDelta(player, 'money', -abilityCost.amount, `${partnershipId} partnership ability`);
+
+    let extraPatch = {};
+    let extraLog   = [];
+    let extraFx    = [];
+
+    if (partnershipId === 'investment') {
+      // Investment: gain 1 PR immediately
+      const { playerPatch: prPatch, logEntries: prLog, pendingEffects: prFx } =
+        applyTrackDelta({ ...player, ...moneyPatch }, 'pr', 1, 'investment partnership');
+      extraPatch = prPatch;
+      extraLog   = prLog;
+      extraFx    = prFx;
+    }
+    // law_firm / business: money deducted; UI then calls acquireLawyer/acquireActivist
+
+    _dispatch({
+      playerPatches: { [playerId]: { ...moneyPatch, ...extraPatch } },
+      sharedPatches: {},
+      logEntries: [
+        ...moneyLog,
+        ...extraLog,
+        { type: 'partnership_ability_used', playerId, partnershipId,
+          message: `${player.name} uses ${partnershipId} partnership ability ($${abilityCost.amount})` },
+      ],
+      pendingEffects: [...moneyFx, ...extraFx],
+    });
+  },
+
+  // ── Water bank ────────────────────────────────────────────────────────────
+
+  /** Unlock a player's water bank for $8 (one-time). */
+  unlockWaterBank(playerId) {
+    const { gameState, _dispatch } = get();
+    const player = gameState.players[playerId];
+
+    if (player.waterBank.unlocked) { console.warn('unlockWaterBank: already unlocked'); return; }
+    if (player.moneyTrack.value < WATER_BANK.UNLOCK_COST) {
+      console.warn(`unlockWaterBank: need $${WATER_BANK.UNLOCK_COST}`); return;
+    }
+
+    const { playerPatch: moneyPatch, logEntries, pendingEffects } =
+      applyTrackDelta(player, 'money', -WATER_BANK.UNLOCK_COST, 'unlock water bank');
+
+    _dispatch({
+      playerPatches: { [playerId]: { ...moneyPatch, waterBank: { unlocked: true, stored: 0 } } },
+      sharedPatches: {},
+      logEntries: [...logEntries, {
+        type: 'water_bank_unlocked', playerId,
+        message: `${player.name} unlocks their water bank for $${WATER_BANK.UNLOCK_COST}`,
+      }],
+      pendingEffects,
+    });
+  },
+
+  /**
+   * Deposit water cubes into the bank owner's water bank.
+   * The depositing player pays $1 per cube to the bank owner.
+   * @param {string} depositorId  — the player depositing cubes
+   * @param {string} ownerId      — the bank owner (receives $1 per cube)
+   * @param {number} cubeCount
+   */
+  depositToWaterBank(depositorId, ownerId, cubeCount) {
+    const { gameState, _dispatch } = get();
+    const depositor = gameState.players[depositorId];
+    const owner     = gameState.players[ownerId];
+
+    if (!owner.waterBank.unlocked) { console.warn('depositToWaterBank: bank not unlocked'); return; }
+
+    const available = owner.waterBank.stored;
+    const capacity  = WATER_BANK.CAPACITY;
+    const canStore  = capacity - available;
+    const toStore   = Math.min(cubeCount, canStore, depositor.waterCubes);
+    const cost      = toStore * WATER_BANK.DEPOSIT_COST;
+
+    if (toStore <= 0)                            { console.warn('depositToWaterBank: nothing to store'); return; }
+    if (depositor.moneyTrack.value < cost)       { console.warn(`depositToWaterBank: need $${cost}`); return; }
+    if (depositor.waterCubes < toStore)          { console.warn('depositToWaterBank: insufficient cubes'); return; }
+
+    // Depositor: lose cubes + pay cost
+    const { playerPatch: cubePatch, logEntries: cubeLog } =
+      applyWaterCubeDelta(depositor, -toStore, `deposit to ${owner.name}'s water bank`);
+    const { playerPatch: payPatch, logEntries: payLog, pendingEffects: payFx } =
+      applyTrackDelta({ ...depositor, ...cubePatch }, 'money', -cost, `water bank deposit fee`);
+
+    // Owner: receive payment + update bank
+    const { playerPatch: recvPatch, logEntries: recvLog, pendingEffects: recvFx } =
+      applyTrackDelta(owner, 'money', cost, `water bank income from ${depositor.name}`);
+
+    _dispatch({
+      playerPatches: {
+        [depositorId]: { ...cubePatch, ...payPatch },
+        [ownerId]:     { ...recvPatch, waterBank: { ...owner.waterBank, stored: available + toStore } },
+      },
+      sharedPatches: {},
+      logEntries: [...cubeLog, ...payLog, ...recvLog, {
+        type: 'water_bank_deposit', depositorId, ownerId, cubeCount: toStore, cost,
+        message: `${depositor.name} deposits ${toStore} cube(s) into ${owner.name}'s water bank (paid $${cost})`,
+      }],
+      pendingEffects: [...payFx, ...recvFx],
+    });
+  },
+
+  /**
+   * Owner withdraws any number of stored cubes from their own water bank (free).
+   * @param {string} ownerId
+   * @param {number} cubeCount — pass Infinity to withdraw all
+   */
+  withdrawFromWaterBank(ownerId, cubeCount) {
+    const { gameState, _dispatch } = get();
+    const owner = gameState.players[ownerId];
+
+    if (!owner.waterBank.unlocked)   { console.warn('withdrawFromWaterBank: bank not unlocked'); return; }
+    if (owner.waterBank.stored === 0){ console.warn('withdrawFromWaterBank: bank is empty'); return; }
+
+    const toWithdraw = Math.min(cubeCount, owner.waterBank.stored);
+    const { playerPatch: cubePatch, logEntries } =
+      applyWaterCubeDelta(owner, toWithdraw, 'withdraw from water bank');
+
+    _dispatch({
+      playerPatches: { [ownerId]: {
+        ...cubePatch,
+        waterBank: { ...owner.waterBank, stored: owner.waterBank.stored - toWithdraw },
+      }},
+      sharedPatches: {},
+      logEntries: [...logEntries, {
+        type: 'water_bank_withdraw', ownerId, cubeCount: toWithdraw,
+        message: `${owner.name} withdraws ${toWithdraw} cube(s) from their water bank`,
+      }],
+      pendingEffects: [],
+    });
+  },
+
+  // ── SC influence ──────────────────────────────────────────────────────────
+
+  /**
+   * Place SC influence on the active SC case.
+   * Costs 1 water cube per influence.  Can only place on the first docket case.
+   * @param {string} playerId
+   * @param {string} caseId    — must match docket[0]
+   * @param {number} amount
+   */
+  placeScInfluence(playerId, caseId, amount = 1) {
+    const { gameState, _dispatch } = get();
+    const player    = gameState.players[playerId];
+    const activeCaseId = gameState.sharedBoard.docket[0];
+
+    if (caseId !== activeCaseId) {
+      console.warn(`placeScInfluence: ${caseId} is not the active case (${activeCaseId})`); return;
+    }
+    if (player.waterCubes < amount) {
+      console.warn(`placeScInfluence: need ${amount} water cube(s)`); return;
+    }
+
+    const { playerPatch: cubePatch, logEntries: cubeLog } =
+      applyWaterCubeDelta(player, -amount, `SC influence on ${caseId}`);
+
+    const currentInfluence = player.scInfluence[caseId] ?? 0;
+    const newScInfluence   = { ...player.scInfluence, [caseId]: currentInfluence + amount };
+
+    _dispatch({
+      playerPatches: { [playerId]: { ...cubePatch, scInfluence: newScInfluence } },
+      sharedPatches: {},
+      logEntries: [...cubeLog, {
+        type: 'sc_influence_placed', playerId, caseId, amount,
+        total: currentInfluence + amount,
+        message: `${player.name} places ${amount} SC influence on ${caseId} (total: ${currentInfluence + amount})`,
       }],
       pendingEffects: [],
     });
