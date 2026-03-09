@@ -2590,12 +2590,11 @@ export default function GameTable() {
   const undo                       = useGameStore(s => s.undo);
   const redo                       = useGameStore(s => s.redo);
   const dismissChoiceEffect        = useGameStore(s => s.dismissChoiceEffect);
-  const canUndo = (state.undoStack?.length ?? 0) > 0;
-  const canRedo = (state.redoStack?.length ?? 0) > 0;
-
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
   const pendingEffects = storeState ? (storePending ?? []) : (MOCK_STATE.pendingEffects ?? []);
+  const canUndo = (storeState?.undoStack?.length ?? 0) > 0;
+  const canRedo = (storeState?.redoStack?.length ?? 0) > 0;
 
   // Merge real card definitions into the display lookup (real data wins over mock stubs)
   if (state.cardIndex) Object.assign(CARD_INDEX, state.cardIndex);
