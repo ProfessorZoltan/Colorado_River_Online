@@ -51,6 +51,9 @@ export {
   VP_MILESTONES,
   EXHAUST_STATES,
   DOCKET_SIZE,
+  EVENT_FIRST_ROUND,
+  EVENT_LAST_ROUND,
+  WATER_PENALTY_FIRST_ROUND,
 } from './constants.js';
 
 // ── Track & resource management ────────────────────────────────────────────
@@ -90,6 +93,7 @@ export {
   advancePlayerTurn,
   isActionPhase,
   nextPhase,
+  processPendingSCResolution,
 } from './phaseManager.js';
 
 // ── VP calculator ──────────────────────────────────────────────────────────

@@ -5,25 +5,33 @@
  */
 
 // ── Phases within a round ──────────────────────────────────────────────────
-// Order is enforced by phaseManager. "N" = Normal action side of cards,
-// "C" = Court action side. These keys match the action keys in cards.json.
+// New phase order per rules:
+//   ROUND_SETUP  — first player rotates; all players gain water claims & money
+//   NEGOTIATE    — N-side actions, strategy N, partnerships, pass (consecutive)
+//   CONSUME      — event (rounds 2–7); water placed; C-side actions, water on
+//                  projects, partnerships, pass (consecutive)
+//   END_STEP     — project rewards; water-rights penalty (round 3+);
+//                  remove leftover claims; discard-condition check
 export const PHASES = {
-  EVENT:    'event',    // Reveal & resolve 1 event card
-  ACTION_N: 'action_n', // Players take Normal (N) card actions in turn order
-  WATER:    'water',    // Water cubes distributed via water_claim tracks
-  ACTION_C: 'action_c', // Players take Court (C) card actions in turn order
-  INCOME:   'income',   // Fully-watered projects pay out rewards
-  CLEANUP:  'cleanup',  // Exhaust resets, discard-condition checks, turn advance
+  ROUND_SETUP: 'round_setup',
+  NEGOTIATE:   'negotiate',
+  CONSUME:     'consume',
+  END_STEP:    'end_step',
 };
 
 export const PHASE_ORDER = [
-  PHASES.EVENT,
-  PHASES.ACTION_N,
-  PHASES.WATER,
-  PHASES.ACTION_C,
-  PHASES.INCOME,
-  PHASES.CLEANUP,
+  PHASES.ROUND_SETUP,
+  PHASES.NEGOTIATE,
+  PHASES.CONSUME,
+  PHASES.END_STEP,
 ];
+
+// Event card rules: skip round 1; active rounds 2–7 only
+export const EVENT_FIRST_ROUND = 2;
+export const EVENT_LAST_ROUND  = 7;
+
+// Water-rights track penalty starts round 3
+export const WATER_PENALTY_FIRST_ROUND = 3;
 
 // ── Card types (match cards.json "type" field) ─────────────────────────────
 export const CARD_TYPES = {
@@ -37,15 +45,16 @@ export const CARD_TYPES = {
 
 // ── Resource IDs (match player_board.json resource_id / resource fields) ───
 export const RESOURCES = {
-  WATER_CLAIM: 'water_claim',       // Track position (not physical cubes)
+  WATER_CLAIM: 'water_claim',             // Track position
   WATER_CLAIM_TRACK: 'water_claim_track', // Alias used in some card rewards
   MONEY:       'money',
   PR:          'pr',
-  WATER:       'water',             // Physical blue cubes in supply
-  VP:          'vp',                // Victory points (not a track)
-  SC_INFLUENCE:'sc_influence',      // Accumulated per SC case
+  WATER:       'water',             // Physical blue cubes (SC, water bank, bribe)
+  WATER_CLAIMS_TOKEN: 'water_claims_token', // Per-round claim tokens gained at Round Setup
+  VP:          'vp',
+  SC_INFLUENCE:'sc_influence',
   PROTEST_INFLUENCE: 'protest_influence',
-  CITIZEN_CARD: 'citizen_card',     // Reward that grants a specific citizen card
+  CITIZEN_CARD: 'citizen_card',
 };
 
 // ── Track bounds (from player_board.json board_template.tracks) ───────────
@@ -55,8 +64,7 @@ export const TRACK_BOUNDS = {
   pr:          { min: -8, max: 11, hard_cap: true  },
 };
 
-// ── VP milestones (from player_board.json) ────────────────────────────────
-// Checked whenever a track value crosses a milestone boundary.
+// ── VP milestones ────────────────────────────────────────────────────────
 export const VP_MILESTONES = {
   water_claim: [
     { at: 6,  vp: 1 },
@@ -73,22 +81,21 @@ export const VP_MILESTONES = {
   ],
 };
 
-// ── PR threshold markers (from player_board.json) ─────────────────────────
-// Crossing these positions grants a discount on lawyer acquisition.
+// ── PR threshold markers ─────────────────────────────────────────────────
 export const PR_THRESHOLDS = {
-  FREE_LAWYER_ACQUISITION: [-7, 8],  // At these PR values, the $4 lawyer surcharge is waived
+  FREE_LAWYER_ACQUISITION: [-7, 8],
 };
 
-// ── Market sizes (from shared_board.json) ─────────────────────────────────
+// ── Market sizes ─────────────────────────────────────────────────────────
 export const MARKET_SIZES = {
-  lawyer:   4,  // face_up_slots
+  lawyer:   4,
   activist: 4,
 };
 
-// ── Acquisition costs (from shared_board.json lawyer_market.acquisition_cost) ──
-export const LAWYER_ACQUISITION_SURCHARGE = 4; // Standard extra fee on top of card cost
+// ── Acquisition costs ────────────────────────────────────────────────────
+export const LAWYER_ACQUISITION_SURCHARGE = 4;
 
-// ── Partnership buy costs (from player_board.json partnerships) ───────────
+// ── Partnership buy costs ─────────────────────────────────────────────────
 export const PARTNERSHIP_COSTS = {
   law_firm:   4,
   business:   3,
@@ -102,14 +109,14 @@ export const PARTNERSHIP_ABILITY_COSTS = {
   investment: { resource: RESOURCES.MONEY, amount: 2 },
 };
 
-// ── Water bank (from player_board.json water_bank) ────────────────────────
+// ── Water bank ───────────────────────────────────────────────────────────
 export const WATER_BANK = {
   UNLOCK_COST:   8,
   CAPACITY:      9,
-  DEPOSIT_COST:  1,  // Per cube, paid to bank owner
+  DEPOSIT_COST:  1,
 };
 
-// ── Event deck composition (from shared_board.json event_deck.composition) ─
+// ── Event deck composition ────────────────────────────────────────────────
 export const EVENT_DECK_COMPOSITION = [
   { card_id: 'supreme_court_session', copies: 4 },
   { card_id: 'severe_drought',        copies: 2 },
@@ -118,10 +125,10 @@ export const EVENT_DECK_COMPOSITION = [
   { card_id: 'large_snow_melt',       copies: 1 },
 ];
 
-// ── Docket sizing (from shared_board.json docket.size_by_player_count) ────
+// ── Docket sizing ─────────────────────────────────────────────────────────
 export const DOCKET_SIZE = { 2: 1, 3: 3, 4: 6, 5: 10, 6: 15 };
 
-// ── SC case rewards & penalties (universal across all cases in cards.json) ─
+// ── SC case rewards & penalties ───────────────────────────────────────────
 export const SC_CASE_WINNER_REWARD = [
   { resource: RESOURCES.WATER_CLAIM_TRACK, amount: 1 },
   { resource: RESOURCES.VP,               amount: 3 },
@@ -137,11 +144,11 @@ export const SC_CASE_LOSER_PENALTY = [
 export const EXHAUST_STATES = {
   READY:     'ready',
   EXHAUSTED: 'exhausted',
-  LOCKED:    'locked',   // e.g. Red Herring Case effect
+  LOCKED:    'locked',
 };
 
 // ── Game limits ───────────────────────────────────────────────────────────
 export const MAX_PLAYERS    = 6;
 export const MIN_PLAYERS    = 2;
-export const MAX_ROUNDS     = 10; // Game ends after round 10 CLEANUP phase
-export const STRATEGY_DEAL  = 3;  // Cards dealt to each player at setup
+export const MAX_ROUNDS     = 10;
+export const STRATEGY_DEAL  = 3;

@@ -27,7 +27,8 @@ import { resolveActiveSCCase }      from './scResolver.js';
 import { calculateFinalScores }     from './vpCalculator.js';
 import { slideAndDraw, nextId }     from './utils.js';
 import { EXHAUST_STATES, CARD_TYPES, LAWYER_ACQUISITION_SURCHARGE, PHASES,
-         WATER_BANK, PARTNERSHIP_COSTS, PARTNERSHIP_ABILITY_COSTS, MAX_ROUNDS }
+         WATER_BANK, PARTNERSHIP_COSTS, PARTNERSHIP_ABILITY_COSTS, MAX_ROUNDS,
+         WATER_PENALTY_FIRST_ROUND }
   from './constants.js';
 import { lawyerAcquisitionCost, canAcquireWithPr, applyTrackDelta,
          applyWaterCubeDelta }
@@ -222,19 +223,42 @@ export const useGameStore = create((set, get) => ({
 
   advanceToNextPhase(rollFn) {
     const { gameState, boardTemplate, _dispatch, endGame } = get();
-    const { nextPhase: phase, _roundAfterCleanup, _isGameOver, ...update } = advancePhase(
-      gameState,
-      undefined,
-      { boardTemplate, rollFn }
-    );
+    const {
+      nextPhase: phase,
+      _nextFirstPlayerIndex,
+      _activePlayerIndex,
+      _consecutivePasses,
+      _roundAfterEndStep,
+      _isGameOver,
+      ...update
+    } = advancePhase(gameState, undefined, { boardTemplate, rollFn });
+
     _dispatch(update, phase);
 
-    // After CLEANUP: advance round counter (or trigger end-game)
-    if (phase === PHASES.CLEANUP) {
+    // Apply phase-entry side-effects that live outside the StateUpdate shape
+    set(s => {
+      let gs = s.gameState;
+      if (_nextFirstPlayerIndex != null)
+        gs = { ...gs, firstPlayerIndex: _nextFirstPlayerIndex };
+      if (_activePlayerIndex != null)
+        gs = { ...gs, activePlayerIndex: _activePlayerIndex, consecutivePasses: 0 };
+      if (_consecutivePasses != null)
+        gs = { ...gs, consecutivePasses: _consecutivePasses };
+      return { gameState: gs };
+    });
+
+    // ROUND_SETUP auto-advances immediately to NEGOTIATE
+    if (phase === PHASES.ROUND_SETUP) {
+      get().advanceToNextPhase();
+      return;
+    }
+
+    // END_STEP: advance round or end game
+    if (phase === PHASES.END_STEP) {
       if (_isGameOver) {
         endGame();
       } else {
-        set(s => ({ gameState: { ...s.gameState, round: _roundAfterCleanup } }));
+        set(s => ({ gameState: { ...s.gameState, round: _roundAfterEndStep } }));
       }
     }
   },
@@ -265,30 +289,58 @@ export const useGameStore = create((set, get) => ({
 
     const update = resolveCardAction(gameState, playerId, cardId, side, options);
     _dispatch(update);
+    // Any real action resets the consecutive-pass counter
+    set(s => ({ gameState: { ...s.gameState, consecutivePasses: 0 } }));
   },
 
   /**
-   * End the current player's turn within an action phase.
-   * If all players have gone, auto-advances to the next phase.
+   * End the current player's turn after taking an action.
+   * Resets consecutivePasses to 0 and advances to the next player.
    */
   endPlayerTurn() {
-    const { gameState, _dispatch, advanceToNextPhase } = get();
-    const { isPhaseComplete, nextPlayerIndex } = advancePlayerTurn(gameState);
+    const { gameState, _dispatch } = get();
+    const { nextPlayerIndex } = advancePlayerTurn(gameState);
+    const pid = gameState.playerOrder[gameState.activePlayerIndex];
 
-    if (isPhaseComplete) {
+    _dispatch({
+      playerPatches:  {},
+      sharedPatches:  {},
+      logEntries:     [{ type: 'turn_end', playerId: pid,
+        message: `${gameState.players[pid].name} ends their turn` }],
+      pendingEffects: [],
+    });
+    set(s => ({
+      gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex, consecutivePasses: 0 },
+    }));
+  },
+
+  /**
+   * Pass the current player's turn.
+   * When consecutivePasses reaches playerOrder.length, the phase ends.
+   */
+  passPlayerTurn() {
+    const { gameState, _dispatch, advanceToNextPhase } = get();
+    const { nextPlayerIndex } = advancePlayerTurn(gameState);
+    const pid       = gameState.playerOrder[gameState.activePlayerIndex];
+    const newPasses = (gameState.consecutivePasses ?? 0) + 1;
+
+    _dispatch({
+      playerPatches:  {},
+      sharedPatches:  {},
+      logEntries: [{ type: 'turn_pass', playerId: pid,
+        message: `${gameState.players[pid].name} passes `
+               + `(${newPasses}/${gameState.playerOrder.length} consecutive)` }],
+      pendingEffects: [],
+    });
+
+    if (newPasses >= gameState.playerOrder.length) {
       advanceToNextPhase();
     } else {
-      _dispatch({
-        playerPatches:  {},
-        sharedPatches:  {},
-        logEntries:     [{
-          type:    'turn_end',
-          playerId: gameState.playerOrder[gameState.activePlayerIndex],
-          message: `${gameState.players[gameState.playerOrder[gameState.activePlayerIndex]].name} ends their turn`,
-        }],
-        pendingEffects: [],
-      });
-      set(s => ({ gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex } }));
+      set(s => ({
+        gameState: { ...s.gameState,
+          activePlayerIndex: nextPlayerIndex,
+          consecutivePasses: newPasses },
+      }));
     }
   },
 
@@ -764,6 +816,41 @@ export const useGameStore = create((set, get) => ({
    * Dismiss the water_allocation pendingEffect — called when the player
    * clicks "Done Allocating".  Unblocks the Advance button.
    */
+  /**
+   * Consume phase: trade 1 waterClaims token → place 1 water on a project.
+   */
+  placeWaterOnProject(playerId, projectType, projectId) {
+    const { gameState, _dispatch } = get();
+    const player  = gameState.players[playerId];
+    const project = player.projects[projectType]?.[projectId];
+
+    if (!project) { console.warn(`placeWaterOnProject: unknown ${projectType}/${projectId}`); return; }
+    if ((player.waterClaims ?? 0) < 1) { console.warn('placeWaterOnProject: no waterClaims'); return; }
+    if (project.watered >= project.water_slots) { console.warn('placeWaterOnProject: project full'); return; }
+    if ((gameState.sharedBoard.waterSupply ?? 0) < 1) { console.warn('placeWaterOnProject: no river water'); return; }
+
+    const newWatered  = project.watered + 1;
+    const newProjects = {
+      ...player.projects,
+      [projectType]: {
+        ...player.projects[projectType],
+        [projectId]: { ...project, watered: newWatered },
+      },
+    };
+
+    _dispatch({
+      playerPatches: { [playerId]: {
+        projects:    newProjects,
+        waterClaims: player.waterClaims - 1,
+      }},
+      sharedPatches: { waterSupply: gameState.sharedBoard.waterSupply - 1 },
+      logEntries: [{ type: 'water_placed_on_project', playerId, projectId, projectType,
+        message: `${player.name} places water on ${projectId} `
+               + `(${newWatered}/${project.water_slots}) — spends 1 water claim` }],
+      pendingEffects: [],
+    });
+  },
+
   dismissWaterAllocation() {
     set(s => ({
       pendingEffects: s.pendingEffects.filter(e => e.type !== 'water_allocation'),

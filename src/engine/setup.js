@@ -167,13 +167,16 @@ function buildPlayerState(playerConfig, factionDef, boardTemplate) {
     prTrack:         buildTrack(tracks.pr,           sv.pr_track),
 
     vp:               0,
-    waterCubes:       0,  // Physical water cubes in reserve (not claim track)
+    waterCubes:       0,  // Physical water cubes (SC influence, water bank, bribe)
+    waterClaims:      0,  // Per-round claim tokens — set at Round Setup, spent in Consume
     protestInfluence: 0,
     scInfluence:      {},
 
     hand:    [],  // Strategy card instance IDs dealt at setup
     tableau: [],  // Played lawyer/activist/citizen CardInstances
 
+    pendingLawyerDiscount: 0,
+    workaholicActive:      false,
     partnerships: {
       law_firm:   false,
       business:   false,
@@ -270,9 +273,11 @@ export function buildInitialState(playerConfigs, cards, playerBoardSchema, share
 
   // ── Assemble ──────────────────────────────────────────────────────────────
   return {
-    phase:              'setup_complete', // phaseManager will advance to PHASES.EVENT
+    phase:              'setup_complete', // phaseManager will advance to ROUND_SETUP
     round:              1,
     activePlayerIndex:  0,
+    firstPlayerIndex:   0,     // index into playerOrder of the 1st-player marker holder
+    consecutivePasses:  0,     // consecutive passes in Negotiate / Consume; phase ends when = player count
     playerOrder,
     players,
 
