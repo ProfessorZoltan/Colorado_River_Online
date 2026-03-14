@@ -33,7 +33,7 @@ function Band({ title, subtitle, tagline, titleColor = "#F0ECD8", accentColor = 
 // Two silhouettes shaking hands across a mahogany table, government seal on wall,
 // water pipe blueprint spread open, dollar bills sliding across.
 // Palette: ink navy, bureaucratic gold, parchment, mahogany
-function CardDealFederal() {
+export function CardDealFederal() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -134,7 +134,7 @@ function CardDealFederal() {
 // Two hands — one with a fat stack of coins, one with a water cube —
 // meeting in the centre under a single dingy overhead bulb. Shadow play.
 // Palette: near-black, coin gold, water teal, shadow grey
-function CardQuidProQuo() {
+export function CardQuidProQuo() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -223,7 +223,7 @@ function CardQuidProQuo() {
 // Lobbyist ascending grand marble steps of a federal building, briefcase
 // in one hand, water-claim document rolled in the other. Columns tower above.
 // Palette: marble white, shadow charcoal, bureaucratic gold, cold blue sky
-function CardLobbyFederal() {
+export function CardLobbyFederal() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -325,7 +325,7 @@ function CardLobbyFederal() {
 // Cracked, bone-dry riverbed stretching to the horizon. Figure standing
 // in the centre, arms folded, letting rivals suffer. Oppressive sun.
 // Palette: bone white, scorch orange, shadow black, dried-blood red
-function CardScorchedEarth() {
+export function CardScorchedEarth() {
   const cracks = [
     "M40,195 L55,210 L48,228 L62,240 L70,225",
     "M80,200 L88,218 L100,212 L108,230",
@@ -418,7 +418,7 @@ function CardScorchedEarth() {
 // Under-table exchange — one gloved hand passes a water cube under a table,
 // the other scoops up a fan of bills. Extreme low-angle under the tablecloth.
 // Palette: ink black, bribe gold, cold water blue, felt green
-function CardWaterBribe() {
+export function CardWaterBribe() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -505,7 +505,7 @@ function CardWaterBribe() {
 // A massive vivid red herring fish laid across a stack of legal papers,
 // two confused lawyer silhouettes staring at it. Absurdist noir.
 // Palette: fish red, parchment, ink black, sardonic gold
-function CardRedHerring() {
+export function CardRedHerring() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -612,7 +612,7 @@ function CardRedHerring() {
 // A gloved hand slipping a thick envelope through a gap in a courtroom door.
 // Docket cards visible through the gap — being reshuffled. Scales tipping.
 // Palette: court mahogany, judicial purple, wax-seal red, cream
-function CardDonateSCJustice() {
+export function CardDonateSCJustice() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -699,7 +699,7 @@ function CardDonateSCJustice() {
 // A massive iron shield emblazoned with a corporate crest blocking an
 // incoming volley of cards/effects. Figure bracing behind it, immovable.
 // Palette: iron grey, impact red, fortress black, gold crest
-function CardProtectInterests() {
+export function CardProtectInterests() {
   const bolts = [
     { x1: 12,  y1: 40,  x2: 85,  y2: 120 },
     { x1: 30,  y1: 20,  x2: 90,  y2: 105 },

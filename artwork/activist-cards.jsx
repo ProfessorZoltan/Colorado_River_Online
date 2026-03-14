@@ -18,7 +18,7 @@ function GrainDef({ id, seed = 5, freq = 0.88 }) {
 // Controls the flow — figure crouched at a massive pipe valve, river visible
 // through an industrial grate, water rushing or being cut off.
 // Palette: deep teal-black, pipe-iron grey, turbulent blue, rust orange accent
-function CardActivistA() {
+export function CardActivistA() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display:"block", width:"100%", height:"100%" }}>
@@ -148,7 +148,7 @@ function CardActivistA() {
 // Protest escalation — figure on a soapbox, megaphone raised, crowd behind,
 // adding a match to a powder keg (protest card to deck). Urgent red/black energy.
 // Palette: near-black, agitation red, rally cream, smouldering orange
-function CardActivistB() {
+export function CardActivistB() {
   const crowd = [10,28,46,64,84,104,124,144,164,184,204,224];
   const crowdH = [242,238,245,240,243,237,244,241,246,239,244,241];
 
@@ -275,7 +275,7 @@ function CardActivistB() {
 // Intelligence gatherer — hooded figure illuminated by a single lamp, studying
 // a spread of strategy cards face-up on a table. Filing cabinet. Map on wall.
 // Palette: ink black, lantern amber, parchment, moss green accent
-function CardActivistC() {
+export function CardActivistC() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display:"block", width:"100%", height:"100%" }}>
@@ -422,7 +422,7 @@ function CardActivistC() {
 // Information as power — figure scattering leaflets from a rooftop / fire escape,
 // papers catching the wind over a city street. Strategy cards as printed sheets.
 // Palette: olive night, newsprint cream, protest red, sky blue accent
-function CardActivistD() {
+export function CardActivistD() {
   const leaflets = [
     { x:42,  y:96,  rot:-22, vy:1 },
     { x:78,  y:80,  rot:8,   vy:0 },

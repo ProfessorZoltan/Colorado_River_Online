@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useGameStore } from "../engine/index.js";
 import { isActionPhase, satisfiesPrRequirement } from "../engine/index.js";
+import { CardArtDisplay } from "./CardArt.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
@@ -504,6 +505,14 @@ function CardFace({
           </span>
         </div>
       )}
+
+      {/* Card art illustration */}
+      <CardArtDisplay cardId={cardId} style={{
+        height: 72,
+        borderBottom: "1px solid var(--b0)",
+        opacity: (exhausted || locked) ? 0.35 : 1,
+        transition: "opacity 0.2s",
+      }} />
 
       {/* N action */}
       {def.actions?.N ? (

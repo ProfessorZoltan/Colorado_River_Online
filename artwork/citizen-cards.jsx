@@ -17,7 +17,7 @@ function GrainDef({ id, seed = 5, freq = 0.88 }) {
 // WPA harvest mural — farmer silhouette knee-deep in irrigated rows, arms wide
 // beneath a massive golden sun. Water channels run between the furrows.
 // Palette: harvest gold, earth brown, irrigation blue, sky amber
-function CardFarmerA() {
+export function CardFarmerA() {
   const furrows = Array.from({ length: 10 }, (_, i) => i);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
@@ -151,7 +151,7 @@ function CardFarmerA() {
 // Commerce of the community — figure behind a market counter, scales of trade,
 // shelves stocked behind them, coins on the counter. Warm market-day energy.
 // Palette: warm terracotta, market amber, cream, slate blue
-function CardServiceWorkerA() {
+export function CardServiceWorkerA() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -290,7 +290,7 @@ function CardServiceWorkerA() {
 // The community organizer — service worker who moonlights as a protest
 // instigator. Figure pinning a notice to a community board, crowd gathering.
 // Palette: deep plum-grey, protest red, community cream, muted olive
-function CardServiceWorkerB() {
+export function CardServiceWorkerB() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -420,7 +420,7 @@ function CardServiceWorkerB() {
 // Heroic silhouette against a wall of fire, water hose arcing overhead.
 // Fellow firefighters in the background. Bold WPA propaganda energy.
 // Palette: deep soot-black, fire orange, hose-water blue, ash white
-function CardFirefighterA() {
+export function CardFirefighterA() {
   const flames = [
     "M20,195 C14,170 18,150 28,140 C22,155 32,165 30,180 C38,160 44,140 50,125 C48,148 58,162 54,185 C62,158 72,138 76,118 C72,145 80,162 78,188",
     "M76,188 C78,158 88,132 98,110 C94,138 104,155 100,180 C110,152 118,128 122,105 C118,132 128,152 124,178",

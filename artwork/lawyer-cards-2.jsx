@@ -14,7 +14,7 @@ function GrainFilter({ id, seed = 5, freq = 0.88 }) {
   );
 }
 
-function CardShell({ id, bg, titleBg, accentLine, titleColor, subtitleColor, tagline, title, children }) {
+export function CardShell({ id, bg, titleBg, accentLine, titleColor, subtitleColor, tagline, title, children }) {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -40,7 +40,7 @@ function CardShell({ id, bg, titleBg, accentLine, titleColor, subtitleColor, tag
 // Gasmask-wearing figure points at dying river. Slashed leaf motif.
 // Palette: acid orange, soot black, bile yellow, pale sky
 
-function CardAntiEnv() {
+export function CardAntiEnv() {
   const rays = Array.from({ length: 18 }, (_, i) => i);
   return (
     <CardShell id="antenv" bg="#1A0800" titleBg="#C85000" accentLine="#E85000"
@@ -121,7 +121,7 @@ function CardAntiEnv() {
 // Suit jacket on chair-back. Fluorescent-light pallor. Resigned expression.
 // Palette: washed-out beige, flat grey, dull mustard, faded blue
 
-function CardItsAJob() {
+export function CardItsAJob() {
   return (
     <CardShell id="itsjob" bg="#1C1810" titleBg="#3A3428" accentLine="#C8A840"
       titleColor="#E8DCC0" subtitleColor="#C8A840" tagline="Not here for the cause."
@@ -213,7 +213,7 @@ function CardItsAJob() {
 // banner / ribbon motif, conference room light cone.
 // Palette: slate blue-grey, warm cream, olive green, muted gold
 
-function CardTeamPlayer() {
+export function CardTeamPlayer() {
   const figures = [16, 50, 84, 118, 152, 186, 220];
   const figH   = [108, 100, 112, 105, 110, 104, 108];
   const figW   = [10, 11, 9, 11, 10, 9, 11];
@@ -293,7 +293,7 @@ function CardTeamPlayer() {
 // multiple clocks reading different hours, exhausted silhouette.
 // Palette: near-black, amber, ash white, deep blood red accent
 
-function CardWorkaholic() {
+export function CardWorkaholic() {
   return (
     <CardShell id="workaholic" bg="#0C0806" titleBg="#8A1C08" accentLine="#E07818"
       titleColor="#F0E8D0" subtitleColor="#E07818" tagline="Sleep is for opposing counsel."
@@ -393,7 +393,7 @@ function CardWorkaholic() {
 // Crowd blur motion lines behind the giant. Trophy/gold cup passed hand-to-hand.
 // Palette: deep indigo, gold leaf, chalk white, shadow black
 
-function CardRiderCoattails() {
+export function CardRiderCoattails() {
   return (
     <CardShell id="ridercoat" bg="#080B18" titleBg="#0C1030" accentLine="#C8A820"
       titleColor="#F0ECD8" subtitleColor="#C8A820" tagline="Why work when others will?"
@@ -473,7 +473,7 @@ function CardRiderCoattails() {
 // Courtroom gallery crowd as silhouettes. SC building dome as shadow behind.
 // Palette: deep magenta-black, victory gold, triumph white, shadow plum
 
-function CardInItForGlory() {
+export function CardInItForGlory() {
   const crowd = Array.from({length:16}, (_, i) => ({
     x: i * 16 + 4,
     y: 232 + (i % 3) * 5,

@@ -41,7 +41,7 @@ function EventBand({ title, subtitle, tagline, accentColor = "#C82020", bgColor 
 // The city square erupts — massive crowd from above, a speaker on a platform,
 // banners filling the air. Most severe: −3 PR for the low-influence player.
 // Palette: revolutionary red, crowd black, sky white, banner gold
-function CardProtestA() {
+export function CardProtestA() {
   const crowd = Array.from({ length: 120 }, (_, i) => ({
     x: (i % 15) * 16 + 4 + (Math.sin(i * 1.7) * 5),
     y: 110 + Math.floor(i / 15) * 12 + (Math.cos(i * 2.3) * 3),
@@ -150,7 +150,7 @@ function CardProtestA() {
 // Smaller, rawer street action — a picket line blocking a gate or bridge,
 // fewer figures, handmade signs. Dual penalty: −1 PR & −1 water claim.
 // Palette: olive protest, worn cream, rust, shadow grey
-function CardProtestB() {
+export function CardProtestB() {
   const pickets = [10, 44, 78, 112, 146, 180, 214];
 
   return (
@@ -257,7 +257,7 @@ function CardProtestB() {
 // The river shrinks to nothing — cracked mud flats, exposed rock, waterline
 // far below normal, a d6 die visible tumbling from a cracked sky.
 // Palette: bleached bone, sear orange, parched brown, blood-red sun
-function CardSevereDrought() {
+export function CardSevereDrought() {
   const mudCracks = [
     "M20,185 L38,200 L28,218 L44,230",
     "M50,178 L62,195 L70,212 L82,224",
@@ -376,7 +376,7 @@ function CardSevereDrought() {
 // Snowcapped peaks shedding torrents, swollen river below, a d6 tumbling
 // from a breaking cloudbank. Cold blues, silver melt, rushing foam.
 // Palette: glacier white, snowmelt blue, deep slate, silver
-function CardLargeSnowMelt() {
+export function CardLargeSnowMelt() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -496,7 +496,7 @@ function CardLargeSnowMelt() {
 // The temple of law descends from above — a towering view looking up at
 // the SC building facade, scales of justice backlit, gavel falling.
 // Palette: marble white, judicial purple, verdict gold, shadow black
-function CardSCSession() {
+export function CardSCSession() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>

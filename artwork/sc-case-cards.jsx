@@ -233,7 +233,7 @@ const FACTIONS = {
 };
 
 // ── SC CASE CARD COMPONENT ─────────────────────────────────────────────────────
-function SCCaseCard({ plaintiffId, defendantId, seed = 1 }) {
+export function SCCaseCard({ plaintiffId, defendantId, seed = 1 }) {
   const P = FACTIONS[plaintiffId];
   const D = FACTIONS[defendantId];
   const bothStates = P.type === "state" && D.type === "state";

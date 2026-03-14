@@ -6,7 +6,7 @@ const W = 240, H = 340;
 // Scales of justice, robed lawyer silhouette, legal-paper ruled bg
 // Palette: near-black brown, deep crimson, antique gold, parchment
 
-function CardAdjudicator() {
+export function CardAdjudicator() {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
       style={{ display: "block", width: "100%", height: "100%" }}>
@@ -128,7 +128,7 @@ function CardAdjudicator() {
 // Raised fist w/ scroll, crowd silhouettes, river waves, stars
 // Palette: deep navy, burnt orange, acid yellow, cream
 
-function CardProBono() {
+export function CardProBono() {
   const stars = [[30,22],[68,14],[155,18],[192,28],[212,42],[20,50],[38,8],[204,12],[170,35]];
   const crowd = [14,36,56,76,96,116,134,154,174,196,218];
   const crowdOff = [0, 3, 1, 4, 0, 2, 3, 1, 4, 0, 2];
@@ -248,7 +248,7 @@ function CardProBono() {
 // Looming suit torso from below, industrial skyline, smoke, coins
 // Palette: dark forest green, antique gold, near-black
 
-function CardCorporateCounsel() {
+export function CardCorporateCounsel() {
   const winRows = 3, winCols = 4;
   const b1win = [[0.3,0.06,0.28,0.32],[0.1,0.30,0.07,0.22],[0.26,0.16,0.30,0.10]];
   const b2win = [[0.3,0.20],[0.08,0.28],[0.22,0.12],[0.30,0.08],[0.18,0.24]];
@@ -380,7 +380,7 @@ function CardCorporateCounsel() {
 // Dam cross-section schematic, blueprint grid, measurement arrows, specialist figure
 // Palette: deep slate-teal, steel blue, off-white, burnt rust
 
-function CardWaterSpecialist() {
+export function CardWaterSpecialist() {
   const drops = [[38,52],[172,96],[212,132],[28,198],[222,196],[148,58],[70,168]];
 
   return (
