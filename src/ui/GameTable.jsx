@@ -126,9 +126,11 @@ function GlobalStyles() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MOCK_STATE = {
-  phase: "action_n",
+  phase: "negotiate",
   round: 3,
   activePlayerIndex: 0,
+  firstPlayerIndex: 0,
+  consecutivePasses: 0,
   playerOrder: ["p1", "p2", "p3"],
   players: {
     p1: {
@@ -137,7 +139,7 @@ const MOCK_STATE = {
       moneyTrack:      { value: 7, min: 0, max: 19, vp_milestones: [{at:19,vp:5}], threshold_markers: [] },
       prTrack:         { value: 2, min: -8, max: 11, vp_milestones: [{at:6,vp:2},{at:11,vp:5}],
                          threshold_markers: [{at:-7,effect:"free_lawyer_acquisition"},{at:8,effect:"free_lawyer_acquisition"}] },
-      vp: 4, waterCubes: 3, protestInfluence: 0,
+      vp: 4, waterCubes: 3, waterClaims: 4, protestInfluence: 0,
       scInfluence: { "arizona_v_california": 2, "arizona_v_nevada": 0 },
       hand: ["deal_with_federal_government", "donate_to_sc_justice", "scorched_earth_negotiating"],
       tableau: [
@@ -166,7 +168,7 @@ const MOCK_STATE = {
       moneyTrack:      { value: 12, min: 0, max: 19, vp_milestones: [{at:19,vp:5}], threshold_markers: [] },
       prTrack:         { value: -3, min: -8, max: 11, vp_milestones: [{at:6,vp:2},{at:11,vp:5}],
                          threshold_markers: [{at:-7,effect:"free_lawyer_acquisition"},{at:8,effect:"free_lawyer_acquisition"}] },
-      vp: 7, waterCubes: 1, protestInfluence: 0,
+      vp: 7, waterCubes: 1, waterClaims: 5, protestInfluence: 0,
       scInfluence: { "arizona_v_california": 5, "arizona_v_nevada": 0 },
       hand: ["water_bribe", "protect_our_interests"],
       tableau: [
@@ -186,7 +188,7 @@ const MOCK_STATE = {
       moneyTrack:      { value: 3, min: 0, max: 19, vp_milestones: [{at:19,vp:5}], threshold_markers: [] },
       prTrack:         { value: 7, min: -8, max: 11, vp_milestones: [{at:6,vp:2},{at:11,vp:5}],
                          threshold_markers: [{at:-7,effect:"free_lawyer_acquisition"},{at:8,effect:"free_lawyer_acquisition"}] },
-      vp: 9, waterCubes: 0, protestInfluence: 0,
+      vp: 9, waterCubes: 0, waterClaims: 3, protestInfluence: 0,
       scInfluence: { "arizona_v_california": 0, "arizona_v_nevada": 0 },
       hand: ["red_herring_case"],
       tableau: [
@@ -219,7 +221,7 @@ const MOCK_STATE = {
     { id: 3, type: "sc_case_resolved", message: "Arizona v. California: California wins (5 vs 2 influence)",     timestamp: Date.now() - 220000 },
     { id: 4, type: "track_change",  message: "California gains 1 water claim (14 → 15)",                         timestamp: Date.now() - 215000 },
     { id: 5, type: "vp_grant",      message: "California gains 3 VP (total: 7)",                                 timestamp: Date.now() - 210000 },
-    { id: 6, type: "phase_start",   phase: "action_n", message: "Round 3 — Action (N) Phase — Arizona goes first", timestamp: Date.now() - 180000 },
+    { id: 6, type: "phase_start",   phase: "negotiate", message: "Round 3 — Negotiate Phase — Arizona goes first", timestamp: Date.now() - 180000 },
     { id: 7, type: "card_acquired",           message: "Arizona acquires Sneaky Pete for $7",                              timestamp: Date.now() - 90000 },
     { id: 8, type: "incomplete_project_penalty", message: "Chemehuevi loses 1 water claim — has incomplete project(s) with water on them", timestamp: Date.now() - 30000 },
   ],
@@ -277,10 +279,10 @@ const CARD_INDEX = {
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PHASE_ORDER = ["event", "action_n", "water", "action_c", "income", "cleanup"];
+const PHASE_ORDER = ["round_setup", "negotiate", "consume", "end_step"];
 const PHASE_LABELS = {
-  event: "Event", action_n: "Action · N", water: "Water",
-  action_c: "Court · C", income: "Income", cleanup: "Cleanup",
+  round_setup: "Round Setup", negotiate: "Negotiate",
+  consume: "Consume", end_step: "End Step",
 };
 const CARD_COLORS = {
   lawyer: "var(--lawyer)", activist: "var(--activist)",
@@ -428,8 +430,8 @@ function CardFace({
   const cls = ["card-face", exhausted && "exhausted", locked && "locked"].filter(Boolean).join(" ");
 
   // Which side button to show
-  const showN = interactive && phase === "action_n" && !!def.actions?.N;
-  const showC = interactive && phase === "action_c" && !!def.actions?.C;
+  const showN = interactive && phase === "negotiate" && !!def.actions?.N;
+  const showC = interactive && phase === "consume"  && !!def.actions?.C;
 
   function PlayBtn({ side }) {
     const sideDisabled = cardDisabled;
@@ -564,7 +566,7 @@ function MarketGrid({
   slots, label, deckCount,
   isActivePlayer = false, phase, marketType, activePlayer, onAcquire,
 }) {
-  const inActionPhase = phase === 'action_n' || phase === 'action_c';
+  const inActionPhase = phase === 'negotiate' || phase === 'consume';
   const showButtons   = isActivePlayer && inActionPhase && !!activePlayer;
 
   return (
@@ -717,7 +719,7 @@ const PROJECT_DEFS = {
   ],
 };
 
-function ProjectGroup({ type, projects }) {
+function ProjectGroup({ type, projects, isActivePlayer=false, phase, waterClaims=0, waterSupply=0, onPlaceWater }) {
   const defs = PROJECT_DEFS[type];
   const label = type === "citizen" ? "Citizen Projects" : "Income Projects";
   return (
@@ -743,13 +745,29 @@ function ProjectGroup({ type, projects }) {
                 ))}
               </div>
               <span className="f-mono" style={{ fontSize: 9, color: def.rewardColor }}>{def.reward}</span>
-              {isFull    && <span className="f-mono" style={{ fontSize: 8, color: "var(--water-bright)" }}>✓</span>}
-              {isPartial && (
+              {isFull && <span className="f-mono" style={{ fontSize: 8, color: "var(--water-bright)" }}>✓</span>}
+              {isPartial && !isFull && (
                 <span className="f-mono"
-                  title="Water carries over, but you will lose 1 Water Claim at end of Income phase"
-                  style={{ fontSize: 9, color: "var(--terra)", cursor: "default" }}>
-                  −◈
-                </span>
+                  title="Partial — you will lose 1 Water Rights at End Step"
+                  style={{ fontSize: 9, color: "var(--terra)", cursor: "default" }}>−◈</span>
+              )}
+              {isActivePlayer && phase === "consume" && !isFull && waterClaims > 0 && waterSupply > 0 && (
+                <button
+                  onClick={() => onPlaceWater?.(type, def.id)}
+                  onMouseEnter={e => { e.currentTarget.style.background="var(--water)33"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background="transparent"; }}
+                  title="Spend 1 water claim to place 1 water here"
+                  style={{
+                    background: "transparent",
+                    border: "1px solid var(--water-bright)",
+                    borderRadius: 2, color: "var(--water-bright)",
+                    fontFamily: "'Courier Prime',monospace",
+                    fontSize: 9, padding: "1px 7px",
+                    cursor: "pointer", transition: "all 0.12s",
+                    flexShrink: 0,
+                  }}>
+                  +◈
+                </button>
               )}
             </div>
           );
@@ -1015,10 +1033,12 @@ function miniBtn(color) {
 function PlayerBoard({
   player, isActivePlayer = false, phase,
   activeCaseId, allPlayers = {}, playerOrder = [],
+  waterSupply = 0,
   onPlayCard,
   onBuyPartnership, onUsePartnership,
   onUnlockBank, onDeposit, onWithdraw,
   onPlaceScInfluence,
+  onPlaceWater,
 }) {
   const fColor  = FACTION_COLORS[player.factionId] || "var(--terra)";
   const prValue = player.prTrack?.value ?? 0;
@@ -1047,6 +1067,15 @@ function PlayerBoard({
           </span>
         )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          {(player.waterClaims ?? 0) > 0 && (
+            <span className="f-mono"
+              title={`${player.waterClaims} water claim token(s) to spend this round`}
+              style={{ fontSize: 10, color: "var(--water-bright)",
+                border: "1px solid var(--water-bright)", borderRadius: 2,
+                padding: "1px 5px" }}>
+              ◈×{player.waterClaims}
+            </span>
+          )}
           <span style={{ fontSize: 11 }}>💧</span>
           <span className="f-mono" style={{ fontSize: 13, color: "var(--water)" }}>{player.waterCubes}</span>
         </div>
@@ -1063,8 +1092,16 @@ function PlayerBoard({
 
       {/* Projects */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <ProjectGroup type="citizen" projects={player.projects} />
-        <ProjectGroup type="income"  projects={player.projects} />
+        <ProjectGroup type="citizen" projects={player.projects}
+          isActivePlayer={isActivePlayer} phase={phase}
+          waterClaims={player.waterClaims ?? 0}
+          waterSupply={waterSupply}
+          onPlaceWater={onPlaceWater} />
+        <ProjectGroup type="income"  projects={player.projects}
+          isActivePlayer={isActivePlayer} phase={phase}
+          waterClaims={player.waterClaims ?? 0}
+          waterSupply={waterSupply}
+          onPlaceWater={onPlaceWater} />
       </div>
 
       <Divider />
@@ -1092,7 +1129,7 @@ function PlayerBoard({
       </div>
 
       {/* SC Influence — shown in action phases when there's an active case */}
-      {activeCaseId && isActivePlayer && (phase === "action_n" || phase === "action_c") && (
+      {activeCaseId && isActivePlayer && (phase === "negotiate" || phase === "consume") && (
         <>
           <Divider />
           <div>
@@ -1149,7 +1186,7 @@ function PlayerBoard({
                 cardId={instance.cardId}
                 exhaustState={instance.exhaustState}
                 width={130}
-                interactive={isActivePlayer && (phase === "action_n" || phase === "action_c")}
+                interactive={isActivePlayer && (phase === "negotiate" || phase === "consume")}
                 phase={phase}
                 prValue={prValue}
                 canPlay={isActivePlayer}
@@ -1180,7 +1217,8 @@ function PlayerBoard({
  *   onPlayStrategy   fn(cardId)       — plays the card as its N-side action
  */
 function StrategyHand({ hand, isActivePlayer = false, phase, onPlayStrategy }) {
-  const showPlay = isActivePlayer && phase === "action_n";
+  const showPlayN = isActivePlayer && phase === "negotiate";
+  const showPlayC = isActivePlayer && phase === "consume";
 
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "10px 16px",
@@ -1197,7 +1235,7 @@ function StrategyHand({ hand, isActivePlayer = false, phase, onPlayStrategy }) {
           return (
             <div key={`${cardId}_${i}`} style={{ position: "relative", flexShrink: 0 }}>
               <CardFace cardId={cardId} exhaustState="ready" width={120} />
-              {showPlay && def && (
+              {(showPlayN || showPlayC) && def && (
                 <button
                   onClick={() => onPlayStrategy?.(cardId)}
                   onMouseEnter={e => { e.currentTarget.style.background = "var(--strategy)22"; }}
@@ -2127,8 +2165,9 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
 /**
  * WaterAllocationModal
  *
- * Shown during the WATER phase while the water_allocation pendingEffect is
- * unresolved.  Lets all players distribute water cubes to their projects.
+ * Legacy modal — kept in case a 'water_allocation' pendingEffect surfaces.
+ * Under the new rules, water placement is done per-action in Consume phase
+ * via +◈ buttons on each project space.
  *
  * Layout:
  *   - Water supply counter (shared pool, live)
@@ -2384,28 +2423,20 @@ function AllocBtn({ label, enabled, color, title, onClick }) {
 /**
  * PhaseControls
  *
- * Action phases  (action_n / action_c):
- *   Shows "End Turn" for the active player.
+ * Negotiate / Consume phases:
+ *   Active player sees "End Turn" (took action) and "Pass" (consecutive-pass).
  *   Other players see a dimmed "Waiting…" indicator.
  *
- * Water phase:
- *   Shows "Advance" but disabled while a water_allocation pendingEffect
- *   is unresolved — forces players to allocate cubes first.
- *
- * Event phase:
- *   Shows "Advance" but disabled while a protest_activation_round
- *   pendingEffect is unresolved.
- *
- * Income / Cleanup:
- *   Shows "Advance" always enabled — engine auto-resolves these.
+ * Round Setup / End Step auto-resolve, so no Advance button is needed.
+ * Consume phase: Advance is blocked while a protest_activation_round
+ *   or choice_required pendingEffect is unresolved.
  */
-function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, endPlayerTurn, advanceToNextPhase }) {
+function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, endPlayerTurn, passPlayerTurn, advanceToNextPhase }) {
   const inActionPhase = isActionPhase(phase);
   const isYourTurn    = activePlayer?.id === viewingPlayer?.id;
 
   // Block Advance if there are effects that require player decisions first
   const BLOCKING_EFFECT_TYPES = new Set([
-    'water_allocation',
     'protest_activation_round',
     'choice_required',
   ]);
@@ -2451,9 +2482,17 @@ function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, end
         <button
           style={btn("var(--terra)")}
           onClick={endPlayerTurn}
-          onMouseEnter={e => { e.currentTarget.style.background = "var(--terra)"; e.currentTarget.style.color = "#fff"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--terra)"; }}>
+          onMouseEnter={e => { e.currentTarget.style.background="var(--terra)"; e.currentTarget.style.color="#fff"; }}
+          onMouseLeave={e => { e.currentTarget.style.background="none"; e.currentTarget.style.color="var(--terra)"; }}>
           End Turn →
+        </button>
+        <button
+          style={btn("var(--t3)")}
+          onClick={passPlayerTurn}
+          onMouseEnter={e => { e.currentTarget.style.background="var(--b2)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background="none"; }}
+          title="Pass your turn (no action taken)">
+          Pass
         </button>
       </div>
     );
@@ -2462,11 +2501,9 @@ function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, end
   // ── Non-action phases: Advance ───────────────────────────────────────────
   const advanceBlocked = hasBlockingEffect;
   const blockReason = advanceBlocked
-    ? (pendingEffects.find(e => e.type === 'water_allocation')
-        ? "Allocate water before advancing"
-        : pendingEffects.find(e => e.type === 'protest_activation_round')
-          ? "Resolve protest before advancing"
-          : "Resolve pending effects before advancing")
+    ? (pendingEffects.find(e => e.type === 'protest_activation_round')
+        ? "Resolve protest before advancing"
+        : "Resolve pending effects before advancing")
     : null;
 
   return (
@@ -2591,6 +2628,8 @@ export default function GameTable() {
   const undo                       = useGameStore(s => s.undo);
   const redo                       = useGameStore(s => s.redo);
   const dismissChoiceEffect        = useGameStore(s => s.dismissChoiceEffect);
+  const passPlayerTurn             = useGameStore(s => s.passPlayerTurn);
+  const placeWaterOnProjectStore   = useGameStore(s => s.placeWaterOnProject);
   // Fall back to mock when running standalone (no initGame called yet)
   const state          = storeState ?? MOCK_STATE;
   const pendingEffects = storeState ? (storePending ?? []) : (MOCK_STATE.pendingEffects ?? []);
@@ -2615,7 +2654,11 @@ export default function GameTable() {
   // ── Handlers ─────────────────────────────────────────────────────
   // In mock/dev mode, these are no-ops so buttons render without crashing
   const handleEndTurn      = storeState ? endPlayerTurn      : () => {};
+  const handlePassTurn     = storeState ? passPlayerTurn     : () => {};
   const handleAdvancePhase = storeState ? advanceToNextPhase : () => {};
+  const handlePlaceWater   = (projectType, projectId) => {
+    if (storeState && activePlayer) placeWaterOnProjectStore(activePlayer.id, projectType, projectId);
+  };
   const handlePlayAgain    = () => window.location.reload();
 
   // Card action handler — routes through the store's playCardAction.
@@ -2709,6 +2752,7 @@ export default function GameTable() {
           viewingPlayer={viewedPlayer}
           pendingEffects={pendingEffects}
           endPlayerTurn={handleEndTurn}
+          passPlayerTurn={handlePassTurn}
           advanceToNextPhase={handleAdvancePhase}
         />
       </PhaseBar>
@@ -2798,6 +2842,8 @@ export default function GameTable() {
               onDeposit={handleDeposit}
               onWithdraw={handleWithdraw}
               onPlaceScInfluence={handlePlaceScInfluence}
+              waterSupply={state.sharedBoard.waterSupply ?? 0}
+              onPlaceWater={handlePlaceWater}
             />
           </div>
         </div>
@@ -2814,6 +2860,9 @@ export default function GameTable() {
         isActivePlayer={safeViewedId === activeId}
         phase={state.phase}
         onPlayStrategy={handlePlayStrategy}
+        onPlayStrategyC={(cardId) => {
+          if (storeState && activePlayer) playCardAction(activePlayer.id, cardId, "C");
+        }}
       />
     </div>
   );

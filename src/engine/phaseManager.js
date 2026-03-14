@@ -3,235 +3,323 @@
  * Drives the round and phase lifecycle.
  *
  * Round structure:
- *   EVENT → ACTION_N → WATER → ACTION_C → INCOME → CLEANUP
+ *   ROUND_SETUP → NEGOTIATE → CONSUME → END_STEP
  *
- * Each phase has:
- *   - An `enter` function: sets up phase state, returns StateUpdate
- *   - Actions that players take during the phase (dispatched by gameStore)
- *   - An `exit` function: validates phase completion, advances to next
+ *   ROUND_SETUP  auto-resolves (no player input):
+ *     • Rotate first-player marker clockwise
+ *     • Each player gains waterClaimTrack.value waterClaims tokens
+ *     • Each player gains moneyTrack.value money
+ *
+ *   NEGOTIATE  (consecutive-pass phase, N-side actions):
+ *     • Starts with first-player marker holder
+ *     • Players can: use lawyer/activist N, play strategy N,
+ *       buy a partnership, or Pass
+ *     • Phase ends when all players have passed consecutively
+ *
+ *   CONSUME  (consecutive-pass phase, C-side actions):
+ *     • Flip event card (rounds 2–7) and resolve it
+ *     • Place water supply = sum of waterClaimTrack values ± event modifier
+ *     • Players can: use lawyer/activist C, play strategy C,
+ *       buy a partnership, trade 1 waterClaims → 1 water on a project, or Pass
+ *     • Phase ends when all players have passed consecutively
+ *
+ *   END_STEP  auto-resolves:
+ *     • Grant rewards for fully-watered projects (starting with first player)
+ *     • Round ≥ WATER_PENALTY_FIRST_ROUND: players with ≥1 waterClaims left
+ *       OR ≥1 water on an incomplete project lose 1 on waterClaimTrack
+ *     • Remove all leftover waterClaims from all players
+ *     • Reset exhausted cards to READY, clear per-round flags
+ *     • Check discard conditions for all tableau cards
+ *     • Advance round counter
  */
 
-import { PHASES, PHASE_ORDER, EXHAUST_STATES, MAX_ROUNDS } from './constants.js';
-import { resolveEventPhase } from './eventHandler.js';
+import {
+  PHASES, PHASE_ORDER, EXHAUST_STATES, MAX_ROUNDS,
+  EVENT_FIRST_ROUND, EVENT_LAST_ROUND, WATER_PENALTY_FIRST_ROUND,
+} from './constants.js';
+import { resolveEventPhase }   from './eventHandler.js';
 import { resolveActiveSCCase } from './scResolver.js';
-import { resolveIncomePhase, emptyUpdate, mergeUpdates } from './effectResolver.js';
-import { applyTrackDelta } from './trackManager.js';
+import {
+  resolveIncomePhase, emptyUpdate, mergeUpdates,
+} from './effectResolver.js';
+import { applyTrackDelta, checkDiscardConditions } from './trackManager.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase entry points
+// ROUND_SETUP  (auto-resolves)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Enter the EVENT phase: reveal and resolve the top event card.
- * Events are skipped for rounds 1–2 so players can build their tableaus first.
- */
-const FIRST_EVENT_ROUND = 3;
+function enterRoundSetupPhase(state) {
+  const logEntries = [{
+    type:    'phase_start',
+    phase:   PHASES.ROUND_SETUP,
+    round:   state.round,
+    message: `Round ${state.round} — Round Setup`,
+  }];
 
-function enterEventPhase(state, rollFn) {
-  const phaseStart = { type: 'phase_start', phase: PHASES.EVENT, round: state.round,
-    message: `Round ${state.round} — Event Phase` };
+  // Rotate first-player marker clockwise
+  const nextFirstIdx = (state.firstPlayerIndex + 1) % state.playerOrder.length;
 
-  if (state.round < FIRST_EVENT_ROUND) {
-    // No event this round — players need time to build tableaus
-    return {
-      ...emptyUpdate(),
-      logEntries: [
-        phaseStart,
-        { type: 'event_skipped', round: state.round,
-          message: `Round ${state.round} — No event (events begin round ${FIRST_EVENT_ROUND})` },
-      ],
+  // Each player gains waterClaims = waterClaimTrack.value
+  //              gains money      = moneyTrack.value
+  const playerPatches = {};
+  for (const pid of state.playerOrder) {
+    const p            = state.players[pid];
+    const claimsGained = p.waterClaimTrack.value;
+    const moneyGained  = p.moneyTrack.value;
+    const newMoney     = Math.min(p.moneyTrack.value + moneyGained, p.moneyTrack.max ?? 19);
+
+    playerPatches[pid] = {
+      waterClaims: claimsGained,
+      moneyTrack:  { ...p.moneyTrack, value: newMoney },
     };
+
+    logEntries.push({
+      type:    'round_setup_income',
+      playerId: pid,
+      waterClaims: claimsGained,
+      money:       moneyGained,
+      message: `${p.name} gains ${claimsGained} water claims and $${moneyGained}`,
+    });
   }
 
-  const update = resolveEventPhase(state, rollFn);
+  logEntries.push({
+    type:    'first_player_rotated',
+    round:   state.round,
+    newFirstPlayerId: state.playerOrder[nextFirstIdx],
+    message: `${state.players[state.playerOrder[nextFirstIdx]].name} receives the 1st-player marker`,
+  });
+
   return {
-    ...update,
-    sharedPatches: { ...update.sharedPatches },
-    logEntries: [
-      phaseStart,
-      ...update.logEntries,
-    ],
+    playerPatches,
+    sharedPatches: {},
+    logEntries,
+    pendingEffects: [],
+    _nextFirstPlayerIndex: nextFirstIdx,
   };
 }
 
-/**
- * Enter ACTION_N or ACTION_C phase.
- * Sets activePlayerIndex to 0, logs phase start.
- */
-function enterActionPhase(state, phase) {
+// ─────────────────────────────────────────────────────────────────────────────
+// NEGOTIATE  (consecutive-pass phase; N-side actions)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function enterNegotiatePhase(state) {
   return {
     ...emptyUpdate(),
     logEntries: [{
       type:    'phase_start',
-      phase,
+      phase:   PHASES.NEGOTIATE,
       round:   state.round,
-      message: `Round ${state.round} — ${phase === PHASES.ACTION_N ? 'Action (N)' : 'Court (C)'} Phase — ${state.players[state.playerOrder[0]].name} goes first`,
+      message: `Round ${state.round} — Negotiate Phase — ${state.players[state.playerOrder[state.firstPlayerIndex]].name} goes first`,
     }],
+    _activePlayerIndex:  state.firstPlayerIndex,
+    _consecutivePasses:  0,
   };
 }
 
-/**
- * Enter WATER phase: compute water supply from water_claim tracks.
- * The water supply is the sum of all players' water_claim track values.
- * Each player then allocates water cubes to their projects.
- */
-function enterWaterPhase(state) {
-  const totalWaterClaims = state.playerOrder.reduce(
+// ─────────────────────────────────────────────────────────────────────────────
+// CONSUME  (consecutive-pass phase; C-side actions + water placement)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function enterConsumePhase(state, rollFn) {
+  const logEntries = [{
+    type:    'phase_start',
+    phase:   PHASES.CONSUME,
+    round:   state.round,
+    message: `Round ${state.round} — Consume Phase`,
+  }];
+
+  let update = { ...emptyUpdate(), logEntries };
+
+  // ── Event card (rounds EVENT_FIRST_ROUND – EVENT_LAST_ROUND) ────────────
+  if (state.round >= EVENT_FIRST_ROUND && state.round <= EVENT_LAST_ROUND) {
+    const eventUpdate = resolveEventPhase(state, rollFn);
+    update = mergeUpdates(update, eventUpdate);
+  } else {
+    update.logEntries.push({
+      type:    'event_skipped',
+      round:   state.round,
+      message: state.round < EVENT_FIRST_ROUND
+        ? `Round ${state.round} — No event this round`
+        : `Round ${state.round} — Event phase has ended (events ran rounds ${EVENT_FIRST_ROUND}–${EVENT_LAST_ROUND})`,
+    });
+  }
+
+  // ── Place water supply ───────────────────────────────────────────────────
+  // Sum all players' waterClaimTrack values, modified by drought/snow-melt
+  const baseSupply = state.playerOrder.reduce(
     (sum, pid) => sum + state.players[pid].waterClaimTrack.value, 0
   );
+  // Drought/snow-melt patches may have already been applied to sharedBoard
+  // by resolveEventPhase above. If waterSupply was set there, use it.
+  const eventSupply = update.sharedPatches?.waterSupply;
+  const waterSupply = eventSupply != null ? eventSupply : baseSupply;
 
-  // Apply drought/snow-melt modifiers from active event (if any applied a delta)
-  // Those are already applied to sharedBoard.waterSupply by eventHandler.
-  // We set a fresh baseline here if waterSupply is 0 (start of game / first water phase).
-  const waterSupply = state.sharedBoard.waterSupply > 0
-    ? state.sharedBoard.waterSupply  // Already modified by event card
-    : totalWaterClaims;
-
-  return {
+  update = mergeUpdates(update, {
     ...emptyUpdate(),
-    sharedPatches: { waterSupply, droughtRoll: null, snowMeltRoll: null },
-    logEntries:    [{
-      type:    'phase_start',
-      phase:   PHASES.WATER,
+    sharedPatches: { waterSupply },
+    logEntries: [{
+      type:    'water_placed',
       round:   state.round,
       waterSupply,
-      message: `Round ${state.round} — Water Phase (supply: ${waterSupply})`,
+      message: `Water placed in river: ${waterSupply} (sum of water rights${eventSupply != null ? ', modified by event' : ''})`,
     }],
-    // Water allocation is interactive — emitted as pendingEffect for UI
-    pendingEffects: [{
-      type:    'water_allocation',
-      supply:  waterSupply,
-      message: 'Players must allocate water cubes to their projects',
-    }],
+  });
+
+  return {
+    ...update,
+    _activePlayerIndex: state.firstPlayerIndex,
+    _consecutivePasses: 0,
   };
 }
 
-/**
- * Enter INCOME phase: resolve all fully-watered project rewards, then apply
- * the incomplete-project penalty.
- *
- * Incomplete-project penalty rule:
- *   After payouts, if a player has >= 1 project where 0 < watered < water_slots,
- *   they lose 1 space on their Water Claim track.
- *   Partial water is kept -- it carries over to the next round.
- *   Fully-watered projects reset to 0 (cubes return to supply) as normal.
- */
-function enterIncomePhase(state, boardTemplate) {
+// ─────────────────────────────────────────────────────────────────────────────
+// END_STEP  (auto-resolves)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function enterEndStepPhase(state, boardTemplate) {
   let update = {
     ...emptyUpdate(),
     logEntries: [{
       type:    'phase_start',
-      phase:   PHASES.INCOME,
+      phase:   PHASES.END_STEP,
       round:   state.round,
-      message: `Round ${state.round} — Income Phase`,
+      message: `Round ${state.round} — End Step`,
     }],
   };
 
-  // Collect income modifiers registered as pendingEffects during ACTION_C
+  // ── 1. Project rewards (starting with first player) ───────────────────────
   const incomeModifiers = state.pendingIncomeModifiers ?? [];
+  const orderedPids = [
+    ...state.playerOrder.slice(state.firstPlayerIndex),
+    ...state.playerOrder.slice(0, state.firstPlayerIndex),
+  ];
 
-  for (const pid of state.playerOrder) {
+  for (const pid of orderedPids) {
     const playerIncomeUpdate = resolveIncomePhase(state, pid, boardTemplate, incomeModifiers);
     update = mergeUpdates(update, playerIncomeUpdate);
   }
 
-  // -- Incomplete-project water-claim penalty ----------------------------
-  // Read projects from the *post-payout* patches so that projects that just
-  // completed and reset to 0 are not counted as 'started incomplete'.
-  const allProjectDefs = [
-    ...boardTemplate.citizen_projects,
-    ...boardTemplate.income_projects,
-  ];
+  // ── 2. Water-rights track penalty (round ≥ WATER_PENALTY_FIRST_ROUND) ────
+  //    Trigger: player has ≥1 waterClaims left  OR  ≥1 water on any incomplete project
+  if (state.round >= WATER_PENALTY_FIRST_ROUND) {
+    const allProjectDefs = [
+      ...boardTemplate.citizen_projects,
+      ...boardTemplate.income_projects,
+    ];
 
-  for (const pid of state.playerOrder) {
-    const patchedProjects =
-      update.playerPatches?.[pid]?.projects ?? state.players[pid].projects;
+    for (const pid of state.playerOrder) {
+      // Use post-income patches so just-completed projects (now watered=0) aren't counted
+      const patchedPlayer = {
+        ...state.players[pid],
+        ...(update.playerPatches?.[pid] ?? {}),
+      };
 
-    const hasStartedIncomplete = allProjectDefs.some(def => {
-      const type = def.citizen_type ? 'citizen' : 'income';
-      const proj = patchedProjects[type]?.[def.id];
-      return proj && proj.watered > 0 && proj.watered < def.water_slots;
-    });
+      const hasLeftoverClaims = (patchedPlayer.waterClaims ?? 0) > 0;
 
-    if (!hasStartedIncomplete) continue;
+      const hasPartialProject = allProjectDefs.some(def => {
+        const type = def.citizen_type ? 'citizen' : 'income';
+        const proj = patchedPlayer.projects?.[type]?.[def.id];
+        return proj && proj.watered > 0 && proj.watered < def.water_slots;
+      });
 
-    const playerState = state.players[pid];
-    const { playerPatch, logEntries, pendingEffects } = applyTrackDelta(
-      playerState,
-      'water_claim',
-      -1,
-      'incomplete project(s) at end of Income phase'
-    );
+      if (!hasLeftoverClaims && !hasPartialProject) continue;
 
-    update = mergeUpdates(update, {
-      playerPatches:  { [pid]: playerPatch },
-      sharedPatches:  {},
-      logEntries: [
-        ...logEntries,
-        {
-          type:    'incomplete_project_penalty',
-          playerId: pid,
-          message: `${playerState.name} loses 1 water claim — has incomplete project(s) with water on them`,
-        },
-      ],
-      pendingEffects,
-    });
+      const { playerPatch, logEntries: penLogs, pendingEffects: penPE } =
+        applyTrackDelta(state.players[pid], 'water_claim', -1,
+          'leftover water claims or partial project at end of round');
+
+      const reasons = [
+        hasLeftoverClaims  && `${patchedPlayer.waterClaims} leftover claim(s)`,
+        hasPartialProject  && 'partial project with water on it',
+      ].filter(Boolean).join('; ');
+
+      update = mergeUpdates(update, {
+        playerPatches:  { [pid]: playerPatch },
+        sharedPatches:  {},
+        logEntries: [
+          ...penLogs,
+          {
+            type:    'water_rights_penalty',
+            playerId: pid,
+            message: `${state.players[pid].name} loses 1 water rights — ${reasons}`,
+          },
+        ],
+        pendingEffects: penPE,
+      });
+    }
   }
 
-  return update;
-}
+  // ── 3. Remove all leftover waterClaims & reset per-round cubes ────────────
+  const resetPatches = {};
+  for (const pid of state.playerOrder) {
+    resetPatches[pid] = {
+      waterClaims:           0,
+      protestInfluence:      0,
+      pendingLawyerDiscount: 0,
+      workaholicActive:      false,
+    };
+  }
+  update = mergeUpdates(update, {
+    playerPatches: resetPatches,
+    sharedPatches: { waterSupply: 0, casesResolvedThisRound: [] },
+    logEntries:    [],
+    pendingEffects: [],
+  });
 
-/**
- * Enter CLEANUP phase:
- *  - Reset all exhausted cards to READY (LOCKED cards stay LOCKED for 1 round,
- *    then unlock — Red Herring Case)
- *  - Clear protest influence
- *  - Clear pending income modifiers
- *  - Advance activePlayerIndex to 0
- *  - Advance round counter
- */
-function enterCleanupPhase(state) {
-  const playerPatches = {};
-
+  // ── 4. Reset exhausted cards; check discard conditions ───────────────────
+  const tableauPatches = {};
   for (const pid of state.playerOrder) {
     const player = state.players[pid];
 
     const resetTableau = player.tableau.map(c => {
       if (c.exhaustState === EXHAUST_STATES.LOCKED) {
-        // Locked cards unlock after 1 round — store lockedRound to track this
         if (c.lockedRound === state.round) {
           return { ...c, exhaustState: EXHAUST_STATES.READY, lockedRound: undefined };
         }
-        return { ...c, lockedRound: c.lockedRound ?? state.round }; // Remember when it was locked
+        return { ...c, lockedRound: c.lockedRound ?? state.round };
       }
       return { ...c, exhaustState: EXHAUST_STATES.READY };
     });
 
-    playerPatches[pid] = {
-      tableau:          resetTableau,
-      protestInfluence:     0,
-      pendingLawyerDiscount: 0,
-      workaholicActive:     false,
-    };
-  }
+    // Check discard conditions on the reset tableau
+    const resetPlayer = { ...player, tableau: resetTableau,
+      ...(update.playerPatches?.[pid] ?? {}) };
+    const { cardsToDiscard, logEntries: discardLogs } =
+      checkDiscardConditions(resetPlayer, state.cardIndex);
 
+    const finalTableau = cardsToDiscard.length > 0
+      ? resetTableau.filter(c => !cardsToDiscard.includes(c.instanceId))
+      : resetTableau;
+
+    tableauPatches[pid] = { tableau: finalTableau };
+    if (discardLogs.length > 0) {
+      update = mergeUpdates(update, {
+        playerPatches: {}, sharedPatches: {}, logEntries: discardLogs, pendingEffects: [],
+      });
+    }
+  }
+  update = mergeUpdates(update, {
+    playerPatches: tableauPatches, sharedPatches: {}, logEntries: [], pendingEffects: [],
+  });
+
+  // ── 5. Advance round counter (or end game) ────────────────────────────────
   const isLastRound = state.round >= MAX_ROUNDS;
   const nextRound   = isLastRound ? state.round : state.round + 1;
-  const logEntries  = [
-    { type: 'phase_start', phase: PHASES.CLEANUP, round: state.round,
-      message: `Round ${state.round} — Cleanup Phase` },
-    ...(isLastRound ? [{ type: 'game_over', round: state.round,
-      message: `Round ${state.round} complete — game over after ${MAX_ROUNDS} rounds` }] : []),
-  ];
+
+  if (isLastRound) {
+    update.logEntries.push({
+      type: 'game_over', round: state.round,
+      message: `Round ${state.round} complete — game over after ${MAX_ROUNDS} rounds`,
+    });
+  }
 
   return {
-    playerPatches,
-    sharedPatches:    { waterSupply: 0, casesResolvedThisRound: [] },
-    logEntries,
-    pendingEffects:   isLastRound
-      ? [{ type: 'game_over', message: 'Final round cleanup complete — trigger scoring' }]
-      : [],
-    _roundAfterCleanup: nextRound,
+    ...update,
+    pendingEffects: isLastRound
+      ? [...(update.pendingEffects ?? []),
+         { type: 'game_over', message: 'End Step complete — trigger scoring' }]
+      : (update.pendingEffects ?? []),
+    _roundAfterEndStep: nextRound,
     _isGameOver:        isLastRound,
   };
 }
@@ -240,11 +328,6 @@ function enterCleanupPhase(state) {
 // Phase advance
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Get the next phase in the cycle.
- * @param {string} currentPhase
- * @returns {string}
- */
 export function nextPhase(currentPhase) {
   const idx = PHASE_ORDER.indexOf(currentPhase);
   if (idx === -1 || idx === PHASE_ORDER.length - 1) return PHASE_ORDER[0];
@@ -252,43 +335,28 @@ export function nextPhase(currentPhase) {
 }
 
 /**
- * Advance the game to the specified phase (or the next one if not specified).
- * Returns a StateUpdate that the gameStore should apply before updating `state.phase`.
- *
- * @param {Object}  state
- * @param {string}  [targetPhase]   If omitted, advances to next phase in PHASE_ORDER
- * @param {Object}  [options]
- * @param {Object}  [options.boardTemplate]  Required for INCOME phase
- * @param {Function}[options.rollFn]         Optional RNG for EVENT phase
- * @returns {StateUpdate & { nextPhase: string }}
+ * Advance the game to the next (or specified) phase.
+ * Returns StateUpdate + { nextPhase, _nextFirstPlayerIndex?, _roundAfterEndStep?, _isGameOver? }
  */
 export function advancePhase(state, targetPhase, options = {}) {
   const phase = targetPhase ?? nextPhase(state.phase);
   let update;
 
   switch (phase) {
-    case PHASES.EVENT:
-      update = enterEventPhase(state, options.rollFn);
+    case PHASES.ROUND_SETUP:
+      update = enterRoundSetupPhase(state);
       break;
 
-    case PHASES.ACTION_N:
-      update = enterActionPhase(state, PHASES.ACTION_N);
+    case PHASES.NEGOTIATE:
+      update = enterNegotiatePhase(state);
       break;
 
-    case PHASES.WATER:
-      update = enterWaterPhase(state);
+    case PHASES.CONSUME:
+      update = enterConsumePhase(state, options.rollFn);
       break;
 
-    case PHASES.ACTION_C:
-      update = enterActionPhase(state, PHASES.ACTION_C);
-      break;
-
-    case PHASES.INCOME:
-      update = enterIncomePhase(state, options.boardTemplate);
-      break;
-
-    case PHASES.CLEANUP:
-      update = enterCleanupPhase(state);
+    case PHASES.END_STEP:
+      update = enterEndStepPhase(state, options.boardTemplate);
       break;
 
     default:
@@ -303,38 +371,29 @@ export function advancePhase(state, targetPhase, options = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Advance to the next player's turn within an action phase.
- * Returns { isPhaseComplete, nextPlayerIndex }.
- *
- * @param {Object} state
- * @returns {{ isPhaseComplete: boolean, nextPlayerIndex: number, nextPlayerId: string|null }}
+ * Advance to the next player in turn order (wrapping around).
+ * nextIndex is relative to playerOrder, starting from firstPlayerIndex each phase.
  */
 export function advancePlayerTurn(state) {
-  const nextIndex = state.activePlayerIndex + 1;
-  const isPhaseComplete = nextIndex >= state.playerOrder.length;
-
+  const n         = state.playerOrder.length;
+  const nextIndex = (state.activePlayerIndex + 1) % n;
   return {
-    isPhaseComplete,
-    nextPlayerIndex: isPhaseComplete ? 0 : nextIndex,
-    nextPlayerId:    isPhaseComplete ? null : state.playerOrder[nextIndex],
+    nextPlayerIndex: nextIndex,
+    nextPlayerId:    state.playerOrder[nextIndex],
   };
 }
 
 /**
- * Check whether a given phase is an action phase where players take turns.
+ * Returns true if the given phase allows player turns with consecutive-pass ending.
  */
 export function isActionPhase(phase) {
-  return phase === PHASES.ACTION_N || phase === PHASES.ACTION_C;
+  return phase === PHASES.NEGOTIATE || phase === PHASES.CONSUME;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SC case resolution from pending effects
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Process any pending SC case resolution effects in the state.
- * Called by gameStore after event phase produces a 'resolve_sc_case' pendingEffect.
- */
 export function processPendingSCResolution(state) {
   const scEffects = state.pendingEffects?.filter(e => e.type === 'resolve_sc_case') ?? [];
   if (scEffects.length === 0) return emptyUpdate();
