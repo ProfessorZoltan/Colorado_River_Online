@@ -1532,7 +1532,7 @@ function SharedBoardPanel({
  *   rider_coattails_case       — pick a won SC case from the docket
  *   negate_card_or_lawyer      — pick any card/lawyer in play to negate
  */
-function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
+function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
   const [selA, setSelA] = useState(null);
   const [selB, setSelB] = useState(null);
 
@@ -1561,7 +1561,7 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
             display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
           }}>
             <div style={{ width: 7, height: 7, borderRadius: 1, background: fColor }} />
-            <div>
+            <div style={{ flex: 1 }}>
               <div className="f-display" style={{ fontSize: 12, color: 'var(--terra)', letterSpacing: '0.06em' }}>
                 {title}
               </div>
@@ -1571,6 +1571,25 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
                 </div>
               )}
             </div>
+            {canUndo && (
+              <button
+                onClick={onUndo}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--terra)22'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--terra)',
+                  borderRadius: 2,
+                  color: 'var(--terra)',
+                  fontFamily: "'Courier Prime', monospace",
+                  fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase',
+                  padding: '4px 10px',
+                  cursor: 'pointer', transition: 'all 0.12s',
+                  flexShrink: 0,
+                }}>
+                ↩ Undo Card Play
+              </button>
+            )}
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px' }}>
             {children}
@@ -1850,29 +1869,35 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo }) {
               border: '1px solid var(--terra-dim)',
               borderRadius: 2, marginBottom: 4,
             }}>
-              <strong style={{ color: 'var(--terra)' }}>Undo Card Play</strong> — restores state
-              to before the card was played. The strategy card returns to your hand.
-              <br />
+              {canUndo && (
+                <>
+                  <strong style={{ color: 'var(--terra)' }}>Undo Card Play</strong> — restores state
+                  to before the card was played. The strategy card returns to your hand.
+                  <br />
+                </>
+              )}
               <strong style={{ color: 'var(--t3)' }}>Dismiss</strong> — the card effect fizzles.
               The card stays exhausted and is discarded at cleanup.
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-              <button
-                onClick={onUndo}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--terra)22'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                style={{
-                  flex: 1, padding: '6px 0',
-                  background: 'transparent',
-                  border: '1px solid var(--terra)',
-                  borderRadius: 2,
-                  color: 'var(--terra)',
-                  fontFamily: "'Courier Prime', monospace",
-                  fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
-                  cursor: 'pointer', transition: 'all 0.15s',
-                }}>
-                ↩ Undo Card Play
-              </button>
+              {canUndo && (
+                <button
+                  onClick={onUndo}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--terra)22'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  style={{
+                    flex: 1, padding: '6px 0',
+                    background: 'transparent',
+                    border: '1px solid var(--terra)',
+                    borderRadius: 2,
+                    color: 'var(--terra)',
+                    fontFamily: "'Courier Prime', monospace",
+                    fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}>
+                  ↩ Undo Card Play
+                </button>
+              )}
               <button
                 onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId, targetInstanceIds: [] })}
                 onMouseEnter={e => { e.currentTarget.style.background = 'var(--b2)'; }}
@@ -2794,6 +2819,7 @@ export default function GameTable() {
               state={state}
               onResolve={handleResolveChoice}
               onUndo={handleUndoChoiceCard}
+              canUndo={canUndo}
             />
           )}
 

@@ -28,7 +28,7 @@ import { calculateFinalScores }     from './vpCalculator.js';
 import { slideAndDraw, nextId }     from './utils.js';
 import { EXHAUST_STATES, CARD_TYPES, LAWYER_ACQUISITION_SURCHARGE, PHASES,
          WATER_BANK, PARTNERSHIP_COSTS, PARTNERSHIP_ABILITY_COSTS, MAX_ROUNDS,
-         WATER_PENALTY_FIRST_ROUND }
+         WATER_PENALTY_FIRST_ROUND, INFO_REVEALING_ACTIONS }
   from './constants.js';
 import { lawyerAcquisitionCost, canAcquireWithPr, applyTrackDelta,
          applyWaterCubeDelta }
@@ -197,12 +197,17 @@ export const useGameStore = create((set, get) => ({
    * Apply a StateUpdate to the game state, process auto-resolvable pending effects,
    * and push current state to undoStack.
    */
-  _dispatch(update, newPhase) {
+  _dispatch(update, newPhase, { sealUndo = false } = {}) {
     set(store => {
       const current = store.gameState;
 
-      // Save to undo stack (keep last 20 states)
-      const undoStack = [current, ...current.undoStack.slice(0, 19)];
+      // Save to undo stack (keep last 20 states).
+      // When sealUndo is true the action revealed hidden information
+      // (e.g. drew from the strategy deck), so we clear the entire
+      // undo history to prevent the player exploiting that knowledge.
+      const undoStack = sealUndo
+        ? []
+        : [current, ...current.undoStack.slice(0, 19)];
       let   next      = { ...applyUpdate(current, update), undoStack, redoStack: [] };
 
       if (newPhase) next = { ...next, phase: newPhase };
@@ -288,7 +293,8 @@ export const useGameStore = create((set, get) => ({
     }
 
     const update = resolveCardAction(gameState, playerId, cardId, side, options);
-    _dispatch(update);
+    const sealUndo = INFO_REVEALING_ACTIONS.has(`${cardId}_${side}`);
+    _dispatch(update, undefined, { sealUndo });
     // Any real action resets the consecutive-pass counter
     set(s => ({ gameState: { ...s.gameState, consecutivePasses: 0 } }));
   },
@@ -1021,7 +1027,10 @@ export const useGameStore = create((set, get) => ({
     }
 
     if (consumed) {
-      _dispatch(update);
+      // Activist C look-and-draw reveals hidden strategy cards, so seal undo
+      // to prevent exploiting knowledge of unseen cards.
+      const sealUndo = (subtype === 'activist_c_look_and_draw');
+      _dispatch(update, undefined, { sealUndo });
       set(s => ({
         pendingEffects: s.pendingEffects.filter(e => e.subtype !== subtype),
       }));

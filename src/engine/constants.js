@@ -152,3 +152,13 @@ export const MAX_PLAYERS    = 6;
 export const MIN_PLAYERS    = 2;
 export const MAX_ROUNDS     = 10;
 export const STRATEGY_DEAL  = 3;
+
+// ── Undo-sealing actions (reveal hidden deck info) ───────────────────────
+// Playing these card+side combos reveals hidden strategy-deck information
+// (draw or peek). Once dispatched, the undo stack is cleared so the player
+// cannot reverse the action and exploit knowledge of unseen cards.
+export const INFO_REVEALING_ACTIONS = new Set([
+  'activist_d_N',     // Draws 1 strategy card
+  'sneaky_pete_C',    // Draws 1 strategy card
+  'activist_c_C',     // Peeks at top 2 strategy cards
+]);
