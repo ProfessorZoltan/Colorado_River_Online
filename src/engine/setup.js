@@ -241,9 +241,15 @@ export function buildInitialState(playerConfigs, cards, playerBoardSchema, share
   let strategyDeck     = shuffle(allStrategyIds);
   let strategyDiscard  = [];
 
-  // Deal STRATEGY_DEAL cards to each player
+  // The full deal (3 each) exceeds the 8-card deck for 3+ players.
+  // Scale the deal so every player gets the same number of cards:
+  //   2p → 3 each, 3–4p → 2 each, 5–6p → 1 each.
+  const dealCount = Math.min(
+    STRATEGY_DEAL,
+    Math.floor(allStrategyIds.length / playerOrder.length)
+  );
   for (const playerId of playerOrder) {
-    const { drawn, remaining } = drawFrom(strategyDeck, STRATEGY_DEAL);
+    const { drawn, remaining } = drawFrom(strategyDeck, dealCount);
     players[playerId].hand = drawn; // Strategy cards held as raw card IDs in hand
     strategyDeck = remaining;
   }

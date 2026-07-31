@@ -125,17 +125,18 @@ function resolveSupremeCourtSession(state) {
 
 function resolveSevereDrought(state, rollFn) {
   const roll = rollDie(6, rollFn);
-  const newSupply = Math.max(0, state.sharedBoard.waterSupply - roll);
 
+  // Emit a MODIFIER — the Consume phase computes base supply (sum of all
+  // Water Rights) AFTER the event resolves, then applies this delta.
+  // Setting waterSupply directly here destroyed the base supply (it was
+  // still 0 when the event fired).
   return {
     playerPatches:  {},
-    sharedPatches:  { waterSupply: newSupply, droughtRoll: roll },
+    sharedPatches:  { waterSupplyDelta: -roll, droughtRoll: roll },
     logEntries:     [{
       type:    'severe_drought',
       roll,
-      from:    state.sharedBoard.waterSupply,
-      to:      newSupply,
-      message: `Severe Drought: rolled ${roll} — water supply reduced from ${state.sharedBoard.waterSupply} to ${newSupply}`,
+      message: `Severe Drought: rolled ${roll} — river water supply reduced by ${roll} this round`,
     }],
     pendingEffects: [],
   };
@@ -148,17 +149,15 @@ function resolveSevereDrought(state, rollFn) {
 
 function resolveLargeSnowMelt(state, rollFn) {
   const roll = rollDie(6, rollFn);
-  const newSupply = state.sharedBoard.waterSupply + roll;
 
+  // Emit a MODIFIER — see resolveSevereDrought for why.
   return {
     playerPatches:  {},
-    sharedPatches:  { waterSupply: newSupply, snowMeltRoll: roll },
+    sharedPatches:  { waterSupplyDelta: +roll, snowMeltRoll: roll },
     logEntries:     [{
       type:    'large_snow_melt',
       roll,
-      from:    state.sharedBoard.waterSupply,
-      to:      newSupply,
-      message: `Large Snow Melt: rolled ${roll} — water supply increased from ${state.sharedBoard.waterSupply} to ${newSupply}`,
+      message: `Large Snow Melt: rolled ${roll} — river water supply increased by ${roll} this round`,
     }],
     pendingEffects: [],
   };
@@ -178,7 +177,11 @@ function resolveProtest(state, protestCardId) {
     ...emptyUpdate(),
     requiresPlayerInput: true,
     pendingEffects: [{
-      type:       'protest_activation_round',
+      // Emitted as choice_required so the UI's choice-modal path renders it
+      // and resolveChoice/cleanup (both keyed on subtype) can dismiss it.
+      // The old bare-type shape had no modal and permanently blocked Advance.
+      type:       'choice_required',
+      subtype:    'protest_activation_round',
       protestId:  protestCardId,
       playerOrder: [...state.playerOrder],
       message:    `Protest ${protestCardId}: all players may activate activists`,

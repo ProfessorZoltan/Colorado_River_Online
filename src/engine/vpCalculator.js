@@ -112,23 +112,28 @@ export function calculateFinalScores(state) {
       name:      player.name,
       total,
       breakdown,
-      // Tiebreakers (adjust order per rulebook)
+      // Tiebreakers, in RULES §17 order
       waterClaimTrack: player.waterClaimTrack.value,
       moneyTrack:      player.moneyTrack.value,
+      prTrack:         player.prTrack.value,
+      waterCubes:      player.waterCubes ?? 0,
     };
   });
 
-  // Sort by total VP desc, then water_claim desc as tiebreaker, then money desc
-  scores.sort((a, b) => {
-    if (b.total !== a.total)               return b.total - a.total;
-    if (b.waterClaimTrack !== a.waterClaimTrack) return b.waterClaimTrack - a.waterClaimTrack;
-    return b.moneyTrack - a.moneyTrack;
-  });
+  // RULES §17 tiebreaker order: VP → Water Rights → Money → PR → water cubes
+  const compare = (a, b) =>
+    (b.total - a.total) ||
+    (b.waterClaimTrack - a.waterClaimTrack) ||
+    (b.moneyTrack - a.moneyTrack) ||
+    (b.prTrack - a.prTrack) ||
+    (b.waterCubes - a.waterCubes);
 
-  // Assign rank (tied players get same rank)
+  scores.sort(compare);
+
+  // Assign rank — players tie only when ALL tiebreakers are equal
   let rank = 1;
   for (let i = 0; i < scores.length; i++) {
-    if (i > 0 && scores[i].total < scores[i - 1].total) rank = i + 1;
+    if (i > 0 && compare(scores[i - 1], scores[i]) !== 0) rank = i + 1;
     scores[i].rank = rank;
   }
 

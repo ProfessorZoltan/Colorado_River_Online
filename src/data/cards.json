@@ -12,7 +12,7 @@
       "N": {
         "cost": "exhaust",
         "icon": "water_claim",
-        "text": "Gain or Lose 1 water claim cube",
+        "text": "Gain or Lose 1 Water Rights (track)",
         "project_type": null,
         "payment": null,
         "dice": null,
@@ -163,6 +163,7 @@
       "N": {
         "cost": "exhaust",
         "icon": "money",
+        "amount": 1,
         "project_type": null,
         "text": "Gain $1",
         "payment": null,
@@ -260,7 +261,7 @@
         ],
         "icon": "money",
         "project_type": null,
-        "text": "Pay 1 water claim cube to gain $3",
+        "text": "Pay 1 Water Rights (track) to gain $3",
         "dice": null,
         "penalty": null
       },
@@ -319,6 +320,7 @@
             "cost": null,
             "payment": null,
             "icon": "money",
+            "amount": 2,
             "project_type": null,
             "text": "Gain $2",
             "dice": null,
@@ -363,7 +365,8 @@
           {
             "cost": null,
             "payment": null,
-            "icon": null,
+            "icon": "vp",
+            "amount": 1,
             "project_type": null,
             "text": "Gain 1 VP",
             "dice": null,
@@ -396,7 +399,7 @@
         ],
         "icon": "water_claim",
         "project_type": null,
-        "text": "Pay $2 to gain 1 water claim",
+        "text": "Pay $2 to gain 1 Water Rights (track)",
         "dice": null,
         "penalty": null
       },
@@ -556,7 +559,7 @@
         ],
         "icon": "money",
         "project_type": null,
-        "text": "Lose 1 water claim: Gain $3",
+        "text": "Lose 1 Water Rights (track): Gain $3",
         "dice": null,
         "penalty": null
       },
@@ -612,7 +615,7 @@
         ],
         "icon": "water_claim",
         "project_type": null,
-        "text": "Pay $3: Gain 1 water claim",
+        "text": "Pay $3: Gain 1 Water Rights (track)",
         "dice": null,
         "penalty": null
       },
@@ -665,12 +668,7 @@
       "N": null,
       "C": {
         "cost": null,
-        "payment": [
-          {
-            "resource": "water",
-            "amount": 1
-          }
-        ],
+        "payment": null,
         "icon": "money",
         "project_type": null,
         "text": "Give 1 water cube to an opponent: they must give you $3",

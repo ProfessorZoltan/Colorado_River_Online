@@ -63,47 +63,84 @@ export function resolveActiveSCCase(state) {
   }
 
   // ── Determine winner by SC influence ────────────────────────────────────
-  const plaintiffInfluence = state.players[plaintiffPlayerId].scInfluence[caseId] ?? 0;
-  const defendantInfluence = state.players[defendantPlayerId].scInfluence[caseId] ?? 0;
-
-  // Tie → plaintiff wins (convention; adjust here if rulebook says otherwise)
-  const winnerId = plaintiffInfluence >= defendantInfluence ? plaintiffPlayerId : defendantPlayerId;
-  const loserId  = winnerId === plaintiffPlayerId ? defendantPlayerId : plaintiffPlayerId;
-
-  const winnerInfluence = state.players[winnerId].scInfluence[caseId] ?? 0;
-  const loserInfluence  = state.players[loserId].scInfluence[caseId]  ?? 0;
-  const isTie           = plaintiffInfluence === defendantInfluence;
+  const plaintiffInfluence = Number(state.players[plaintiffPlayerId].scInfluence[caseId]) || 0;
+  const defendantInfluence = Number(state.players[defendantPlayerId].scInfluence[caseId]) || 0;
+  const isTie = plaintiffInfluence === defendantInfluence;
 
   let update = emptyUpdate();
 
-  // Log the outcome
-  update.logEntries.push({
-    type:              'sc_case_resolved',
-    caseId,
-    caseName:          caseDef.name,
-    winnerId,
-    loserId,
-    winnerInfluence,
-    loserInfluence,
-    isTie,
-    message: `SC Case: ${caseDef.name} — ${state.players[winnerId].name} wins ` +
-             `(${winnerInfluence} vs ${loserInfluence} influence)${isTie ? ' [plaintiff wins tie]' : ''}`,
-  });
+  // Thread a working copy of players through sequential deltas so multiple
+  // rewards to the same track/VP stack instead of last-writer-wins.
+  let workingPlayers = state.players;
+  const workingState = () => ({ ...state, players: workingPlayers });
+  const applyU = (u) => {
+    update = mergeUpdates(update, u);
+    for (const [pid, patch] of Object.entries(u.playerPatches ?? {})) {
+      workingPlayers = { ...workingPlayers, [pid]: { ...workingPlayers[pid], ...patch } };
+    }
+  };
 
-  // ── Apply winner rewards ────────────────────────────────────────────────
-  for (const reward of (caseDef.winner_reward ?? [])) {
-    update = mergeUpdates(
-      update,
-      applyResourceDelta(state, winnerId, reward.resource, reward.amount, `SC win: ${caseDef.name}`)
-    );
-  }
+  let winnerId = null;
+  let loserId  = null;
 
-  // ── Apply loser penalties ───────────────────────────────────────────────
-  for (const penalty of (caseDef.loser_penalty ?? [])) {
-    update = mergeUpdates(
-      update,
-      applyResourceDelta(state, loserId, penalty.resource, -Math.abs(penalty.amount), `SC loss: ${caseDef.name}`)
-    );
+  if (isTie) {
+    // RULES §12/§19: tie = no winner, no loser, no rewards, no penalties.
+    update.logEntries.push({
+      type:     'sc_case_resolved',
+      caseId,
+      caseName: caseDef.name,
+      winnerId: null,
+      loserId:  null,
+      winnerInfluence: plaintiffInfluence,
+      loserInfluence:  defendantInfluence,
+      isTie:    true,
+      message: `SC Case: ${caseDef.name} — tie at ${plaintiffInfluence} influence: ` +
+               `no rewards, no penalties`,
+    });
+  } else {
+    winnerId = plaintiffInfluence > defendantInfluence ? plaintiffPlayerId : defendantPlayerId;
+    loserId  = winnerId === plaintiffPlayerId ? defendantPlayerId : plaintiffPlayerId;
+
+    const winnerInfluence = winnerId === plaintiffPlayerId ? plaintiffInfluence : defendantInfluence;
+    const loserInfluence  = winnerId === plaintiffPlayerId ? defendantInfluence : plaintiffInfluence;
+
+    update.logEntries.push({
+      type:              'sc_case_resolved',
+      caseId,
+      caseName:          caseDef.name,
+      winnerId,
+      loserId,
+      winnerInfluence,
+      loserInfluence,
+      isTie:             false,
+      message: `SC Case: ${caseDef.name} — ${state.players[winnerId].name} wins ` +
+               `(${winnerInfluence} vs ${loserInfluence} influence)`,
+    });
+
+    // ── Apply winner rewards ──────────────────────────────────────────────
+    for (const reward of (caseDef.winner_reward ?? [])) {
+      applyU(applyResourceDelta(workingState(), winnerId, reward.resource, reward.amount, `SC win: ${caseDef.name}`));
+    }
+
+    // ── Apply loser penalties ─────────────────────────────────────────────
+    for (const penalty of (caseDef.loser_penalty ?? [])) {
+      applyU(applyResourceDelta(workingState(), loserId, penalty.resource, -Math.abs(penalty.amount), `SC loss: ${caseDef.name}`));
+    }
+
+    // ── Passive trigger: "In it for Glory" — +1 VP on SC win ─────────────
+    const winnerTableau = state.players[winnerId].tableau ?? [];
+    for (const instance of winnerTableau) {
+      const instDef = state.cardIndex[instance.cardId];
+      if (instDef?.passive?.trigger === 'on_win_sc_case') {
+        applyU(applyResourceDelta(workingState(), winnerId, RESOURCES.VP, 1, `${instDef.name} passive: SC win`));
+        update.logEntries.push({
+          type:     'passive_triggered',
+          cardId:   instance.cardId,
+          playerId: winnerId,
+          message:  `${state.players[winnerId].name}'s ${instDef.name} triggers: +1 VP for winning SC case`,
+        });
+      }
+    }
   }
 
   // ── Docket: shift left, append resolved case to end ────────────────────
@@ -119,26 +156,10 @@ export function resolveActiveSCCase(state) {
   const influenceResets = {};
   for (const pid of state.playerOrder) {
     influenceResets[pid] = {
-      scInfluence: { ...state.players[pid].scInfluence, [caseId]: 0 },
+      scInfluence: { ...workingPlayers[pid].scInfluence, [caseId]: 0 },
     };
   }
-  update = mergeUpdates(update, { playerPatches: influenceResets, sharedPatches: {}, logEntries: [], pendingEffects: [] });
-
-  // ── Passive trigger: "In it for Glory" — +1 VP on SC win ───────────────
-  const winnerTableau = state.players[winnerId].tableau ?? [];
-  for (const instance of winnerTableau) {
-    const cardDef = state.cardIndex[instance.cardId];
-    if (cardDef?.passive?.trigger === 'on_win_sc_case') {
-      const vpUpdate = applyResourceDelta(state, winnerId, RESOURCES.VP, 1, `${cardDef.name} passive: SC win`);
-      update = mergeUpdates(update, vpUpdate);
-      update.logEntries.push({
-        type:     'passive_triggered',
-        cardId:   instance.cardId,
-        playerId: winnerId,
-        message:  `${state.players[winnerId].name}'s ${cardDef.name} triggers: +1 VP for winning SC case`,
-      });
-    }
-  }
+  applyU({ playerPatches: influenceResets, sharedPatches: {}, logEntries: [], pendingEffects: [] });
 
   return update;
 }

@@ -120,10 +120,13 @@ function autoResolvePending(state, pendingEffects, boardTemplate) {
       }
 
       case 'grant_citizen_card': {
-        // Find a citizen card of the specified type in the cardIndex
+        // Find a citizen card of the specified type in the cardIndex.
+        // citizen_type uses underscores ("service_worker") while card names
+        // use spaces ("Service Worker A") — normalize before matching.
+        const wanted = (effect.citizen_type ?? '').toLowerCase().replace(/_/g, ' ');
         const citizenCard = Object.values(current.cardIndex).find(
           c => c.type === CARD_TYPES.CITIZEN &&
-               c.name?.toLowerCase().includes(effect.citizen_type)
+               c.name?.toLowerCase().includes(wanted)
         );
         if (citizenCard) {
           const instance = { instanceId: `${citizenCard.id}_${nextId()}`, cardId: citizenCard.id, exhaustState: EXHAUST_STATES.READY };
@@ -145,6 +148,16 @@ function autoResolvePending(state, pendingEffects, boardTemplate) {
         break;
       }
 
+      case 'pr_threshold_reached':
+        // Informational — the surcharge waiver is computed from live PR.
+        // Dropping it here keeps it from accumulating forever.
+        break;
+
+      case 'game_over':
+        // endGame() is triggered by the phase manager's _isGameOver flag;
+        // this marker effect would otherwise linger in pendingEffects.
+        break;
+
       default:
         // Requires UI interaction — keep in remaining
         remaining.push(effect);
@@ -152,6 +165,11 @@ function autoResolvePending(state, pendingEffects, boardTemplate) {
   }
 
   return { state: current, remainingEffects: remaining };
+}
+
+/** Effects that block phase advance / passing until a player resolves them. */
+function isBlockingEffect(e) {
+  return e.type === 'choice_required';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,6 +185,10 @@ export const useGameStore = create((set, get) => ({
   pendingIncomeModifiers: [],
   isGameOver:         false,
   finalScores:        null,
+  pendingTurnAdvance: false,  // A turn action resolved into a choice; advance when it clears
+  protestActivations: {},     // { [playerId]: true } — one activist per player per protest
+  undoPending:        [],     // pendingEffects snapshots parallel to gameState.undoStack
+  redoPending:        [],
 
   // ── Initialization ───────────────────────────────────────────────────────
 
@@ -186,6 +208,10 @@ export const useGameStore = create((set, get) => ({
       pendingIncomeModifiers: [],
       isGameOver:         false,
       finalScores:        null,
+      pendingTurnAdvance: false,
+      protestActivations: {},
+      undoPending:        [],
+      redoPending:        [],
     });
     // Auto-advance from 'setup_complete' to first EVENT phase
     get().advanceToNextPhase();
@@ -208,6 +234,11 @@ export const useGameStore = create((set, get) => ({
       const undoStack = sealUndo
         ? []
         : [current, ...current.undoStack.slice(0, 19)];
+      // pendingEffects live on the store root — snapshot them in parallel so
+      // undo restores choice modals consistently with the game state.
+      const undoPending = sealUndo
+        ? []
+        : [store.pendingEffects, ...store.undoPending.slice(0, 19)];
       let   next      = { ...applyUpdate(current, update), undoStack, redoStack: [] };
 
       if (newPhase) next = { ...next, phase: newPhase };
@@ -220,23 +251,63 @@ export const useGameStore = create((set, get) => ({
       return {
         gameState:      resolved,
         pendingEffects: remainingEffects,
+        undoPending,
+        redoPending:    [],
       };
     });
+  },
+
+  // ── Turn-economy helpers ──────────────────────────────────────────────────
+
+  /**
+   * Called after every TURN action (RULES §4: one action per turn, then play
+   * passes clockwise). Resets the consecutive-pass counter and advances the
+   * turn — deferred while a blocking choice modal is open.
+   */
+  _afterTurnAction() {
+    set(s => ({ gameState: { ...s.gameState, consecutivePasses: 0 } }));
+    const blocked = get().pendingEffects.some(isBlockingEffect);
+    if (blocked) { set({ pendingTurnAdvance: true }); return; }
+    get()._advanceTurn();
+  },
+
+  _advanceTurn() {
+    const { gameState } = get();
+    set({ pendingTurnAdvance: false });
+    if (!isActionPhase(gameState.phase)) return;
+    const { nextPlayerIndex } = advancePlayerTurn(gameState);
+    set(s => ({ gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex } }));
   },
 
   // ── Phase management ──────────────────────────────────────────────────────
 
   advanceToNextPhase(rollFn) {
-    const { gameState, boardTemplate, _dispatch, endGame } = get();
+    const { gameState, boardTemplate, _dispatch, endGame, pendingEffects } = get();
+
+    // Blocking choices must be resolved before the game moves on
+    if (pendingEffects.some(isBlockingEffect)) {
+      console.warn('advanceToNextPhase: blocked by pending choice effects');
+      return;
+    }
+
+    // Leaving the End Step starts the next round — the counter advances HERE,
+    // not when the End Step begins (the header showed round N+1 while still
+    // resolving round N).
+    let baseState = gameState;
+    if (gameState.phase === PHASES.END_STEP) {
+      baseState = { ...gameState, round: gameState.round + 1 };
+      set({ gameState: baseState, protestActivations: {} });
+    }
+
     const {
       nextPhase: phase,
       _nextFirstPlayerIndex,
       _activePlayerIndex,
       _consecutivePasses,
-      _roundAfterEndStep,
+      _roundAfterEndStep,   // legacy — round now advances on END_STEP exit
       _isGameOver,
       ...update
-    } = advancePhase(gameState, undefined, { boardTemplate, rollFn });
+    } = advancePhase(baseState, undefined, { boardTemplate, rollFn });
 
     _dispatch(update, phase);
 
@@ -249,7 +320,7 @@ export const useGameStore = create((set, get) => ({
         gs = { ...gs, activePlayerIndex: _activePlayerIndex, consecutivePasses: 0 };
       if (_consecutivePasses != null)
         gs = { ...gs, consecutivePasses: _consecutivePasses };
-      return { gameState: gs };
+      return { gameState: gs, pendingTurnAdvance: false };
     });
 
     // ROUND_SETUP auto-advances immediately to NEGOTIATE
@@ -258,13 +329,9 @@ export const useGameStore = create((set, get) => ({
       return;
     }
 
-    // END_STEP: advance round or end game
-    if (phase === PHASES.END_STEP) {
-      if (_isGameOver) {
-        endGame();
-      } else {
-        set(s => ({ gameState: { ...s.gameState, round: _roundAfterEndStep } }));
-      }
+    // END_STEP of the final round: trigger scoring
+    if (phase === PHASES.END_STEP && _isGameOver) {
+      endGame();
     }
   },
 
@@ -272,10 +339,21 @@ export const useGameStore = create((set, get) => ({
 
   /**
    * Play a card action (N or C side).
-   * Validates that it's this player's turn and the card is ready.
+   * Validates phase/side, turn, ownership, and readiness. A successful play
+   * is a TURN action: the pass counter resets and the turn auto-advances
+   * (RULES §4 — one action per turn).
    */
   playCardAction(playerId, cardId, side, options = {}) {
     const { gameState, _dispatch } = get();
+
+    // Phase + side validation: N cards in Negotiate, C cards in Consume
+    if (!isActionPhase(gameState.phase)) {
+      console.warn(`playCardAction: not an action phase (${gameState.phase})`); return;
+    }
+    const expectedSide = gameState.phase === PHASES.NEGOTIATE ? 'N' : 'C';
+    if (side !== expectedSide) {
+      console.warn(`playCardAction: ${side}-side actions not allowed during ${gameState.phase}`); return;
+    }
 
     // Turn validation
     const activePlayer = gameState.playerOrder[gameState.activePlayerIndex];
@@ -284,24 +362,70 @@ export const useGameStore = create((set, get) => ({
       return;
     }
 
-    // Exhaust validation
-    const player   = gameState.players[playerId];
-    const instance = player.tableau.find(c => c.cardId === cardId);
-    if (instance && instance.exhaustState !== EXHAUST_STATES.READY) {
-      console.warn(`playCardAction: ${cardId} is ${instance.exhaustState}`);
-      return;
+    // Blocking choice open → no new actions
+    if (get().pendingEffects.some(isBlockingEffect)) {
+      console.warn('playCardAction: resolve the pending choice first'); return;
+    }
+
+    const player  = gameState.players[playerId];
+    const cardDef = gameState.cardIndex[cardId];
+    if (!cardDef) { console.warn(`playCardAction: unknown card ${cardId}`); return; }
+
+    // Ownership validation: strategy cards come from hand, others from tableau
+    const isStrategy = cardDef.type === CARD_TYPES.STRATEGY;
+    if (isStrategy) {
+      if (!player.hand.includes(cardId)) {
+        console.warn(`playCardAction: ${cardId} not in ${playerId}'s hand`); return;
+      }
+    } else {
+      const instance = options.instanceId
+        ? player.tableau.find(c => c.instanceId === options.instanceId)
+        : (player.tableau.find(c => c.cardId === cardId && c.exhaustState === EXHAUST_STATES.READY)
+           ?? player.tableau.find(c => c.cardId === cardId));
+      if (!instance) {
+        console.warn(`playCardAction: ${cardId} not in ${playerId}'s tableau`); return;
+      }
+      if (instance.exhaustState !== EXHAUST_STATES.READY) {
+        console.warn(`playCardAction: ${cardId} is ${instance.exhaustState}`);
+        return;
+      }
+      options = { ...options, instanceId: instance.instanceId };
     }
 
     const update = resolveCardAction(gameState, playerId, cardId, side, options);
+
+    // Fizzled/rejected plays (wrong side, unpayable cost) are NOT actions:
+    // log them without consuming the turn or touching the pass counter.
+    if (update._failed) {
+      _dispatch(update);
+      return;
+    }
+
+    // Strategy cards are single-use (RULES §7/§11): hand → discard pile
+    if (isStrategy) {
+      const baseHand = update.playerPatches[playerId]?.hand ?? player.hand;
+      const newHand  = [...baseHand];
+      newHand.splice(newHand.indexOf(cardId), 1);
+      update.playerPatches[playerId] = {
+        ...(update.playerPatches[playerId] ?? {}),
+        hand: newHand,
+      };
+      const baseDiscard = update.sharedPatches.strategyDiscard
+        ?? gameState.sharedBoard.strategyDiscard;
+      update.sharedPatches = {
+        ...update.sharedPatches,
+        strategyDiscard: [...baseDiscard, cardId],
+      };
+    }
+
     const sealUndo = INFO_REVEALING_ACTIONS.has(`${cardId}_${side}`);
     _dispatch(update, undefined, { sealUndo });
-    // Any real action resets the consecutive-pass counter
-    set(s => ({ gameState: { ...s.gameState, consecutivePasses: 0 } }));
+    get()._afterTurnAction();
   },
 
   /**
-   * End the current player's turn after taking an action.
-   * Resets consecutivePasses to 0 and advances to the next player.
+   * Legacy manual turn end — advances the turn WITHOUT resetting the
+   * consecutive-pass counter (turns auto-advance after actions now).
    */
   endPlayerTurn() {
     const { gameState, _dispatch } = get();
@@ -316,7 +440,7 @@ export const useGameStore = create((set, get) => ({
       pendingEffects: [],
     });
     set(s => ({
-      gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex, consecutivePasses: 0 },
+      gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex },
     }));
   },
 
@@ -326,6 +450,12 @@ export const useGameStore = create((set, get) => ({
    */
   passPlayerTurn() {
     const { gameState, _dispatch, advanceToNextPhase } = get();
+
+    // A blocking choice (protest, card choice) must resolve before passing
+    if (get().pendingEffects.some(isBlockingEffect)) {
+      console.warn('passPlayerTurn: resolve the pending choice first'); return;
+    }
+
     const { nextPlayerIndex } = advancePlayerTurn(gameState);
     const pid       = gameState.playerOrder[gameState.activePlayerIndex];
     const newPasses = (gameState.consecutivePasses ?? 0) + 1;
@@ -354,13 +484,35 @@ export const useGameStore = create((set, get) => ({
 
   /**
    * Acquire a lawyer from the lawyer market.
+   *
+   * Two paths:
+   *  - Standard (a TURN action): pay printed cost + $4 surcharge (waived at
+   *    PR ≤ −7 / ≥ +8), minus any Team Player discount.
+   *  - Via Law Firm partnership (a FREE action): a pending_partnership_acquire
+   *    effect is open — pay the flat $4 ability fee instead (RULES §14),
+   *    minus any Team Player discount. The fee is charged here, on
+   *    completion, so an abandoned ability never strands money.
    */
   acquireLawyer(playerId, marketIndex) {
-    const { gameState, _dispatch } = get();
+    const { gameState, _dispatch, pendingEffects } = get();
     const player   = gameState.players[playerId];
     const cardId   = gameState.sharedBoard.lawyerMarket[marketIndex];
 
     if (!cardId) { console.warn('acquireLawyer: empty slot'); return; }
+    if (!isActionPhase(gameState.phase)) {
+      console.warn('acquireLawyer: not an action phase'); return;
+    }
+
+    const viaPartnership = pendingEffects.find(
+      e => e.type === 'pending_partnership_acquire' && e.playerId === playerId
+        && e.marketType === 'lawyer'
+    );
+
+    // Standard acquisition consumes your turn — it must BE your turn
+    const activePlayer = gameState.playerOrder[gameState.activePlayerIndex];
+    if (!viaPartnership && activePlayer !== playerId) {
+      console.warn(`acquireLawyer: not ${playerId}'s turn`); return;
+    }
 
     const cardDef = gameState.cardIndex[cardId];
     if (!canAcquireWithPr(cardDef, player.prTrack.value)) {
@@ -368,7 +520,9 @@ export const useGameStore = create((set, get) => ({
       return;
     }
 
-    let cost = lawyerAcquisitionCost(cardDef, player.prTrack.value);
+    let cost = viaPartnership
+      ? PARTNERSHIP_ABILITY_COSTS.law_firm.amount
+      : lawyerAcquisitionCost(cardDef, player.prTrack.value);
     if (player.pendingLawyerDiscount > 0) {
       cost = Math.max(0, cost - player.pendingLawyerDiscount);
     }
@@ -405,7 +559,8 @@ export const useGameStore = create((set, get) => ({
           cardId,
           cardType: 'lawyer',
           cost,
-          message:  `${player.name} acquires ${cardDef.name} for $${cost}`,
+          message:  `${player.name} acquires ${cardDef.name} for $${cost}`
+                  + (viaPartnership ? ' (Law Firm partnership)' : ''),
         },
       ],
       pendingEffects: [],
@@ -417,17 +572,25 @@ export const useGameStore = create((set, get) => ({
               && e.marketType === 'lawyer')
       ),
     }));
+    // Standard acquisition is a turn action; partnership acquisition is free
+    if (!viaPartnership) get()._afterTurnAction();
   },
 
   /**
    * Acquire an activist from the activist market.
+   * Requires the Business partnership (RULES §7) — flat $3 fee. When used
+   * through the partnership ability pending effect it is a FREE action;
+   * a direct market buy consumes the turn.
    */
   acquireActivist(playerId, marketIndex) {
-    const { gameState, _dispatch } = get();
+    const { gameState, _dispatch, pendingEffects } = get();
     const player  = gameState.players[playerId];
     const cardId  = gameState.sharedBoard.activistMarket[marketIndex];
 
     if (!cardId) { console.warn('acquireActivist: empty slot'); return; }
+    if (!isActionPhase(gameState.phase)) {
+      console.warn('acquireActivist: not an action phase'); return;
+    }
 
     const partnership = player.partnerships.business;
     if (!partnership) {
@@ -435,8 +598,18 @@ export const useGameStore = create((set, get) => ({
       return;
     }
 
+    const viaPartnership = pendingEffects.find(
+      e => e.type === 'pending_partnership_acquire' && e.playerId === playerId
+        && e.marketType === 'activist'
+    );
+
+    const activePlayer = gameState.playerOrder[gameState.activePlayerIndex];
+    if (!viaPartnership && activePlayer !== playerId) {
+      console.warn(`acquireActivist: not ${playerId}'s turn`); return;
+    }
+
     // Business partnership cost: $3 per activist
-    const cost = PARTNERSHIP_COSTS.business;
+    const cost = PARTNERSHIP_ABILITY_COSTS.business.amount;
     if (player.moneyTrack.value < cost) {
       console.warn(`acquireActivist: insufficient money`);
       return;
@@ -470,6 +643,16 @@ export const useGameStore = create((set, get) => ({
               && e.marketType === 'activist')
       ),
     }));
+    if (!viaPartnership) get()._afterTurnAction();
+  },
+
+  /** Cancel an open partnership-acquire flow (no fee was charged yet). */
+  cancelPartnershipAcquire(playerId) {
+    set(s => ({
+      pendingEffects: s.pendingEffects.filter(
+        e => !(e.type === 'pending_partnership_acquire' && e.playerId === playerId)
+      ),
+    }));
   },
 
   // ── Partnership actions ────────────────────────────────────────────────────
@@ -480,6 +663,15 @@ export const useGameStore = create((set, get) => ({
   purchasePartnership(playerId, partnershipId) {
     const { gameState, _dispatch } = get();
     const player = gameState.players[playerId];
+
+    // Buying a partnership is a TURN action (RULES §4)
+    if (!isActionPhase(gameState.phase)) {
+      console.warn('purchasePartnership: not an action phase'); return;
+    }
+    const activePlayer = gameState.playerOrder[gameState.activePlayerIndex];
+    if (activePlayer !== playerId) {
+      console.warn(`purchasePartnership: not ${playerId}'s turn`); return;
+    }
 
     if (player.partnerships[partnershipId]) {
       console.warn(`purchasePartnership: ${partnershipId} already owned`);
@@ -507,67 +699,27 @@ export const useGameStore = create((set, get) => ({
       ],
       pendingEffects: [],
     });
-  },
-
-  // ── Water allocation ────────────────────────────────────────────────────────
-
-  /**
-   * Allocate water cubes to a player's project during the WATER phase.
-   * @param {string} playerId
-   * @param {'citizen'|'income'} projectType
-   * @param {string} projectId
-   * @param {number} cubeCount
-   */
-  allocateWater(playerId, projectType, projectId, cubeCount) {
-    const { gameState, _dispatch } = get();
-    const player  = gameState.players[playerId];
-    const project = player.projects[projectType]?.[projectId];
-
-    if (!project) { console.warn(`allocateWater: unknown project ${projectType}/${projectId}`); return; }
-
-    const maxSlots   = project.water_slots;
-    const current    = project.watered;
-    const toAdd      = Math.min(cubeCount, maxSlots - current);
-    const supply     = gameState.sharedBoard.waterSupply;
-
-    if (toAdd <= 0)      { console.warn('allocateWater: project already full'); return; }
-    if (supply < toAdd)  { console.warn(`allocateWater: insufficient water supply (${supply})`); return; }
-
-    const newProjects = {
-      ...player.projects,
-      [projectType]: {
-        ...player.projects[projectType],
-        [projectId]: { ...project, watered: current + toAdd },
-      },
-    };
-
-    _dispatch({
-      playerPatches: { [playerId]: { projects: newProjects } },
-      sharedPatches: { waterSupply: supply - toAdd },
-      logEntries: [{
-        type: 'water_allocated', playerId, projectId, projectType, cubeCount: toAdd,
-        message: `${player.name} allocates ${toAdd} water to ${projectId} (${current + toAdd}/${maxSlots})`,
-      }],
-      pendingEffects: [],
-    });
+    get()._afterTurnAction();
   },
 
   // ── Partnership ability use ──────────────────────────────────────────────────
 
   /**
-   * Use a partnership ability:
-   *   law_firm   → Pay $4, triggers acquireLawyer flow (UI picks the market slot)
-   *   business   → Pay $3, triggers acquireActivist flow (UI picks the slot)
+   * Use a partnership ability (a FREE action — RULES §14: "can be used at
+   * any point during an action phase"; it does not consume the turn):
+   *   law_firm   → opens an acquire flow; the flat $4 fee is charged when the
+   *                lawyer is actually taken (acquireLawyer), so nothing is
+   *                stranded if the flow is abandoned
+   *   business   → same, $3, for activists
    *   investment → Pay $2, gain 1 PR immediately
-   *
-   * For law_firm / business the money is deducted here; the card acquisition
-   * is handled by the existing acquireLawyer / acquireActivist actions driven
-   * by the UI.  For investment, the full effect resolves here.
    */
   usePartnershipAbility(playerId, partnershipId) {
-    const { gameState, _dispatch } = get();
+    const { gameState, _dispatch, pendingEffects } = get();
     const player = gameState.players[playerId];
 
+    if (!isActionPhase(gameState.phase)) {
+      console.warn('usePartnershipAbility: not an action phase'); return;
+    }
     if (!player.partnerships[partnershipId]) {
       console.warn(`usePartnershipAbility: ${partnershipId} not owned`); return;
     }
@@ -579,55 +731,63 @@ export const useGameStore = create((set, get) => ({
       console.warn(`usePartnershipAbility: insufficient money`); return;
     }
 
-    // Deduct cost
-    const { playerPatch: moneyPatch, logEntries: moneyLog, pendingEffects: moneyFx } =
-      applyTrackDelta(player, 'money', -abilityCost.amount, `${partnershipId} partnership ability`);
-
-    let extraPatch = {};
-    let extraLog   = [];
-    let extraFx    = [];
-
     if (partnershipId === 'investment') {
-      // Investment: gain 1 PR immediately
+      // Investment: pay $2, gain 1 PR immediately
+      const { playerPatch: moneyPatch, logEntries: moneyLog, pendingEffects: moneyFx } =
+        applyTrackDelta(player, 'money', -abilityCost.amount, `${partnershipId} partnership ability`);
       const { playerPatch: prPatch, logEntries: prLog, pendingEffects: prFx } =
         applyTrackDelta({ ...player, ...moneyPatch }, 'pr', 1, 'investment partnership');
-      extraPatch = prPatch;
-      extraLog   = prLog;
-      extraFx    = prFx;
-    }
-    // law_firm / business: money deducted; emit a pending effect so the UI
-    // can guide the player to pick a card from the market.
-    if (partnershipId === 'law_firm' || partnershipId === 'business') {
-      extraFx.push({
-        type:          'pending_partnership_acquire',
-        partnershipId,
-        playerId,
-        marketType:    partnershipId === 'law_firm' ? 'lawyer' : 'activist',
-        message: `${player.name} paid $${abilityCost.amount} — now acquire a `
-          + `${partnershipId === 'law_firm' ? 'Lawyer' : 'Activist'} from the market`,
+
+      _dispatch({
+        playerPatches: { [playerId]: { ...moneyPatch, ...prPatch } },
+        sharedPatches: {},
+        logEntries: [
+          ...moneyLog, ...prLog,
+          { type: 'partnership_ability_used', playerId, partnershipId,
+            message: `${player.name} uses investment partnership ability ($${abilityCost.amount})` },
+        ],
+        pendingEffects: [...moneyFx, ...prFx],
       });
+      return;
     }
 
-    _dispatch({
-      playerPatches: { [playerId]: { ...moneyPatch, ...extraPatch } },
-      sharedPatches: {},
-      logEntries: [
-        ...moneyLog,
-        ...extraLog,
-        { type: 'partnership_ability_used', playerId, partnershipId,
-          message: `${player.name} uses ${partnershipId} partnership ability ($${abilityCost.amount})` },
-      ],
-      pendingEffects: [...moneyFx, ...extraFx],
-    });
+    if (partnershipId === 'law_firm' || partnershipId === 'business') {
+      // Don't double-open the flow
+      const marketType = partnershipId === 'law_firm' ? 'lawyer' : 'activist';
+      if (pendingEffects.some(e => e.type === 'pending_partnership_acquire'
+            && e.playerId === playerId && e.marketType === marketType)) {
+        console.warn('usePartnershipAbility: acquire flow already open'); return;
+      }
+      // No money moves yet — the fee is charged on completion in
+      // acquireLawyer / acquireActivist (prevents pay-then-lose-the-fee).
+      _dispatch({
+        playerPatches: {},
+        sharedPatches: {},
+        logEntries: [
+          { type: 'partnership_ability_used', playerId, partnershipId,
+            message: `${player.name} uses the ${partnershipId} partnership — `
+              + `pick a ${marketType} from the market ($${abilityCost.amount} on acquisition)` },
+        ],
+        pendingEffects: [{
+          type:          'pending_partnership_acquire',
+          partnershipId,
+          playerId,
+          marketType,
+          message: `${player.name}: acquire a ${marketType === 'lawyer' ? 'Lawyer' : 'Activist'} `
+            + `from the market for $${abilityCost.amount} (or cancel)`,
+        }],
+      });
+    }
   },
 
   // ── Water bank ────────────────────────────────────────────────────────────
 
-  /** Unlock a player's water bank for $8 (one-time). */
+  /** Unlock a player's water bank for $8 (one-time; free action). */
   unlockWaterBank(playerId) {
     const { gameState, _dispatch } = get();
     const player = gameState.players[playerId];
 
+    if (!isActionPhase(gameState.phase)) { console.warn('unlockWaterBank: not an action phase'); return; }
     if (player.waterBank.unlocked) { console.warn('unlockWaterBank: already unlocked'); return; }
     if (player.moneyTrack.value < WATER_BANK.UNLOCK_COST) {
       console.warn(`unlockWaterBank: need $${WATER_BANK.UNLOCK_COST}`); return;
@@ -659,6 +819,7 @@ export const useGameStore = create((set, get) => ({
     const depositor = gameState.players[depositorId];
     const owner     = gameState.players[ownerId];
 
+    if (!isActionPhase(gameState.phase)) { console.warn('depositToWaterBank: not an action phase'); return; }
     if (!owner.waterBank.unlocked) { console.warn('depositToWaterBank: bank not unlocked'); return; }
 
     const available = owner.waterBank.stored;
@@ -704,6 +865,7 @@ export const useGameStore = create((set, get) => ({
     const { gameState, _dispatch } = get();
     const owner = gameState.players[ownerId];
 
+    if (!isActionPhase(gameState.phase)) { console.warn('withdrawFromWaterBank: not an action phase'); return; }
     if (!owner.waterBank.unlocked)   { console.warn('withdrawFromWaterBank: bank not unlocked'); return; }
     if (owner.waterBank.stored === 0){ console.warn('withdrawFromWaterBank: bank is empty'); return; }
 
@@ -728,8 +890,9 @@ export const useGameStore = create((set, get) => ({
   // ── SC influence ──────────────────────────────────────────────────────────
 
   /**
-   * Place SC influence on the active SC case.
-   * Costs 1 water cube per influence.  Can only place on the first docket case.
+   * Place SC influence on the active SC case (free action).
+   * Costs 1 water cube per influence.  Can only place on the first docket case,
+   * and only the named plaintiff/defendant factions may place (RULES §12).
    * @param {string} playerId
    * @param {string} caseId    — must match docket[0]
    * @param {number} amount
@@ -739,8 +902,17 @@ export const useGameStore = create((set, get) => ({
     const player    = gameState.players[playerId];
     const activeCaseId = gameState.sharedBoard.docket[0];
 
+    if (!isActionPhase(gameState.phase)) {
+      console.warn('placeScInfluence: not an action phase'); return;
+    }
     if (caseId !== activeCaseId) {
       console.warn(`placeScInfluence: ${caseId} is not the active case (${activeCaseId})`); return;
+    }
+    const caseDef = gameState.cardIndex[caseId];
+    const isParty = caseDef?.plaintiff?.id === player.factionId
+                 || caseDef?.defendant?.id === player.factionId;
+    if (!isParty) {
+      console.warn(`placeScInfluence: ${player.factionId} is not a party to ${caseId}`); return;
     }
     if (player.waterCubes < amount) {
       console.warn(`placeScInfluence: need ${amount} water cube(s)`); return;
@@ -764,45 +936,6 @@ export const useGameStore = create((set, get) => ({
     });
   },
 
-  // ── Water deallocation (remove cubes from a project) ─────────────────────────
-
-  /**
-   * Remove water cubes from a project (used by the − button in the
-   * Water Allocation modal to undo over-allocation).
-   */
-  deallocateWater(playerId, projectType, projectId, cubeCount) {
-    const { gameState, _dispatch } = get();
-    const player  = gameState.players[playerId];
-    const project = player.projects[projectType]?.[projectId];
-
-    if (!project) { console.warn(`deallocateWater: unknown project ${projectType}/${projectId}`); return; }
-
-    const toRemove = Math.min(cubeCount, project.watered);
-    if (toRemove <= 0) { console.warn('deallocateWater: nothing to remove'); return; }
-
-    const newProjects = {
-      ...player.projects,
-      [projectType]: {
-        ...player.projects[projectType],
-        [projectId]: { ...project, watered: project.watered - toRemove },
-      },
-    };
-
-    _dispatch({
-      playerPatches: { [playerId]: { projects: newProjects } },
-      sharedPatches: { waterSupply: gameState.sharedBoard.waterSupply + toRemove },
-      logEntries: [{
-        type:    'water_deallocated',
-        playerId,
-        projectId,
-        projectType,
-        cubeCount: toRemove,
-        message: `${player.name} removes ${toRemove} water from ${projectId} (${project.watered - toRemove}/${project.water_slots})`,
-      }],
-      pendingEffects: [],
-    });
-  },
-
   /**
    * Dismiss a specific choice_required pendingEffect by subtype.
    * Used when:
@@ -816,20 +949,28 @@ export const useGameStore = create((set, get) => ({
         e => !(e.type === 'choice_required' && e.subtype === subtype)
       ),
     }));
+    // A deferred turn advance may now be unblocked
+    if (get().pendingTurnAdvance && !get().pendingEffects.some(isBlockingEffect)) {
+      get()._advanceTurn();
+    }
   },
 
   /**
-   * Dismiss the water_allocation pendingEffect — called when the player
-   * clicks "Done Allocating".  Unblocks the Advance button.
-   */
-  /**
    * Consume phase: trade 1 waterClaims token → place 1 water on a project.
+   * A TURN action — placing several cubes takes several turns (RULES §4).
    */
   placeWaterOnProject(playerId, projectType, projectId) {
     const { gameState, _dispatch } = get();
     const player  = gameState.players[playerId];
     const project = player.projects[projectType]?.[projectId];
 
+    if (gameState.phase !== PHASES.CONSUME) {
+      console.warn('placeWaterOnProject: only during the Consume phase'); return;
+    }
+    const activePlayer = gameState.playerOrder[gameState.activePlayerIndex];
+    if (activePlayer !== playerId) {
+      console.warn(`placeWaterOnProject: not ${playerId}'s turn`); return;
+    }
     if (!project) { console.warn(`placeWaterOnProject: unknown ${projectType}/${projectId}`); return; }
     if ((player.waterClaims ?? 0) < 1) { console.warn('placeWaterOnProject: no waterClaims'); return; }
     if (project.watered >= project.water_slots) { console.warn('placeWaterOnProject: project full'); return; }
@@ -855,12 +996,44 @@ export const useGameStore = create((set, get) => ({
                + `(${newWatered}/${project.water_slots}) — spends 1 water claim` }],
       pendingEffects: [],
     });
+    get()._afterTurnAction();
   },
 
-  dismissWaterAllocation() {
-    set(s => ({
-      pendingEffects: s.pendingEffects.filter(e => e.type !== 'water_allocation'),
-    }));
+  // ── Protest activist activation (out-of-turn, during a protest event) ──────
+
+  /**
+   * During a Protest event each player may use ONE Activist C ability that
+   * generates protest influence (RULES §12). This happens out of turn while
+   * the protest modal is open, so it bypasses normal turn validation.
+   */
+  activateProtestActivist(playerId, instanceId) {
+    const { gameState, _dispatch, pendingEffects, protestActivations } = get();
+
+    const protestOpen = pendingEffects.some(
+      e => e.type === 'choice_required' && e.subtype === 'protest_activation_round'
+    );
+    if (!protestOpen) { console.warn('activateProtestActivist: no protest in progress'); return; }
+    if (protestActivations[playerId]) {
+      console.warn('activateProtestActivist: already activated an activist this protest'); return;
+    }
+
+    const player   = gameState.players[playerId];
+    const instance = player.tableau.find(c => c.instanceId === instanceId);
+    if (!instance) { console.warn('activateProtestActivist: card not in tableau'); return; }
+    if (instance.exhaustState !== EXHAUST_STATES.READY) {
+      console.warn('activateProtestActivist: card not ready'); return;
+    }
+    const cardDef = gameState.cardIndex[instance.cardId];
+    if (cardDef?.type !== CARD_TYPES.ACTIVIST || cardDef?.actions?.C?.icon !== 'protest_influence') {
+      console.warn('activateProtestActivist: not a protest-influence activist C ability'); return;
+    }
+
+    const update = resolveCardAction(gameState, playerId, instance.cardId, 'C',
+      { instanceId });
+    if (update._failed) { _dispatch(update); return; }
+
+    _dispatch(update);
+    set(s => ({ protestActivations: { ...s.protestActivations, [playerId]: true } }));
   },
 
   // ── Pending effect resolution (called by UI) ────────────────────────────────
@@ -868,6 +1041,9 @@ export const useGameStore = create((set, get) => ({
   resolveChoice(choiceData) {
     const { gameState, pendingEffects, _dispatch } = get();
     const { subtype } = choiceData;
+    // The original pendingEffect (for fields the UI doesn't round-trip,
+    // e.g. the tableau instanceId of the card that raised the choice)
+    const sourceEffect = pendingEffects.find(e => e.subtype === subtype);
 
     let update   = emptyUpdate();
     let consumed = false;
@@ -891,6 +1067,7 @@ export const useGameStore = create((set, get) => ({
       case 'protest_activation_round':
         update   = commitProtestResolution(gameState, choiceData.protestId, gameState.cardIndex);
         consumed = true;
+        set({ protestActivations: {} });
         break;
 
       case 'red_herring_choose_lawyers':
@@ -904,8 +1081,14 @@ export const useGameStore = create((set, get) => ({
             'N',
             { targetInstanceIds: choiceData.targetInstanceIds }
           );
-          consumed = true;
+        } else {
+          // No valid targets — the card fizzles (it already left the hand)
+          update = { ...emptyUpdate(), logEntries: [{
+            type: 'card_fizzled', playerId: choiceData.playerId,
+            message: `${gameState.players[choiceData.playerId]?.name}'s Red Herring Case has no valid targets — effect fizzles`,
+          }] };
         }
+        consumed = true;
         break;
 
       case 'rider_coattails_lawyer': {
@@ -975,6 +1158,15 @@ export const useGameStore = create((set, get) => ({
         // choiceData.targetInstanceId: instanceId of the card/lawyer to negate
         // Mark the instance as locked so its effect is treated as void this round
         {
+          if (!choiceData.targetInstanceId) {
+            // Dismissed with no target — fizzle
+            update = { ...emptyUpdate(), logEntries: [{
+              type: 'card_fizzled', playerId: choiceData.playerId,
+              message: `${gameState.players[choiceData.playerId]?.name}'s Protect Our Interests has no target — effect fizzles`,
+            }] };
+            consumed = true;
+            break;
+          }
           let found = false;
           const playerPatchesNegate = {};
           for (const [pid, player] of Object.entries(gameState.players)) {
@@ -1000,7 +1192,7 @@ export const useGameStore = create((set, get) => ({
             }],
             pendingEffects: [],
           };
-          consumed = found;
+          consumed = true;
         }
         break;
 
@@ -1008,7 +1200,7 @@ export const useGameStore = create((set, get) => ({
         // choiceData.direction: 1 (gain) or -1 (lose)
         update = resolveCardAction(
           gameState, choiceData.playerId, choiceData.cardId, 'N',
-          { delta: choiceData.direction }
+          { delta: choiceData.direction, instanceId: sourceEffect?.instanceId }
         );
         consumed = true;
         break;
@@ -1017,7 +1209,7 @@ export const useGameStore = create((set, get) => ({
         // choiceData.alternativeIdx: 0 = primary, 1+ = alternatives[idx-1]
         update = resolveCardAction(
           gameState, choiceData.playerId, choiceData.cardId, choiceData.side,
-          { alternativeIdx: choiceData.alternativeIdx }
+          { alternativeIdx: choiceData.alternativeIdx, instanceId: sourceEffect?.instanceId }
         );
         consumed = true;
         break;
@@ -1034,6 +1226,11 @@ export const useGameStore = create((set, get) => ({
       set(s => ({
         pendingEffects: s.pendingEffects.filter(e => e.subtype !== subtype),
       }));
+      // A turn action resolved into this choice — advance the turn now that
+      // the choice (and any it chained into) is settled.
+      if (get().pendingTurnAdvance && !get().pendingEffects.some(isBlockingEffect)) {
+        get()._advanceTurn();
+      }
     }
   },
 
@@ -1050,6 +1247,12 @@ export const useGameStore = create((set, get) => ({
           undoStack: rest,
           redoStack: [gameState, ...(gameState.redoStack ?? [])],
         },
+        // Restore the matching pendingEffects snapshot so an undone card play
+        // doesn't leave its choice modal open against rolled-back state
+        pendingEffects: s.undoPending[0] ?? [],
+        undoPending:    s.undoPending.slice(1),
+        redoPending:    [s.pendingEffects, ...s.redoPending],
+        pendingTurnAdvance: false,
       };
     });
   },
@@ -1065,6 +1268,10 @@ export const useGameStore = create((set, get) => ({
           undoStack: [gameState, ...(gameState.undoStack ?? [])],
           redoStack: rest,
         },
+        pendingEffects: s.redoPending[0] ?? [],
+        redoPending:    s.redoPending.slice(1),
+        undoPending:    [s.pendingEffects, ...s.undoPending],
+        pendingTurnAdvance: false,
       };
     });
   },

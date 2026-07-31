@@ -1,24 +1,16 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useGameStore } from "../engine/index.js";
-import { isActionPhase, satisfiesPrRequirement } from "../engine/index.js";
+import { isActionPhase, satisfiesPrRequirement, lawyerAcquisitionCost, canAcquireWithPr }
+  from "../engine/index.js";
+import { useNetStore, controlsSeat } from "../net/netStore.js";
 import { CardArtDisplay } from "./CardArt.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
+// (Fonts are loaded via <link> tags in index.html — no runtime injection.)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Playfair+Display+SC:wght@400;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap";
-
 function GlobalStyles() {
-  useEffect(() => {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = FONTS_URL;
-    document.head.appendChild(link);
-    return () => document.head.removeChild(link);
-  }, []);
-
   return (
     <style>{`
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,7 +27,8 @@ function GlobalStyles() {
         --lawyer: #c8a550; --activist: #7eb87e;
         --citizen: #6b9ec8; --strategy: #a07ec8; --event: #c86060;
       }
-      body { background: var(--bg0); color: var(--t1); font-family: 'EB Garamond', Georgia, serif; overflow: hidden; }
+      html, body, #root { height: 100%; }
+      body { background: var(--bg0); color: var(--t1); font-family: 'EB Garamond', Georgia, serif; overflow: auto; }
       ::-webkit-scrollbar { width: 3px; height: 3px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: var(--b2); border-radius: 2px; }
@@ -123,158 +116,14 @@ function GlobalStyles() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MOCK GAME STATE  (replace with useGameStore in production)
+// CARD DEFINITION INDEX
+//
+// Populated from gameState.cardIndex inside GameTable (useMemo) before any
+// child component renders. Components read it as a plain lookup table.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MOCK_STATE = {
-  phase: "negotiate",
-  round: 3,
-  activePlayerIndex: 0,
-  firstPlayerIndex: 0,
-  consecutivePasses: 0,
-  playerOrder: ["p1", "p2", "p3"],
-  players: {
-    p1: {
-      id: "p1", factionId: "arizona", name: "Arizona", isAI: false,
-      waterClaimTrack: { value: 9, min: 3, max: 22, vp_milestones: [{at:6,vp:1},{at:11,vp:2},{at:17,vp:3},{at:22,vp:5}], threshold_markers: [] },
-      moneyTrack:      { value: 7, min: 0, max: 19, vp_milestones: [{at:19,vp:5}], threshold_markers: [] },
-      prTrack:         { value: 2, min: -8, max: 11, vp_milestones: [{at:6,vp:2},{at:11,vp:5}],
-                         threshold_markers: [{at:-7,effect:"free_lawyer_acquisition"},{at:8,effect:"free_lawyer_acquisition"}] },
-      vp: 4, waterCubes: 3, waterClaims: 4, protestInfluence: 0,
-      scInfluence: { "arizona_v_california": 2, "arizona_v_nevada": 0 },
-      hand: ["deal_with_federal_government", "donate_to_sc_justice", "scorched_earth_negotiating"],
-      tableau: [
-        { instanceId: "sneaky_pete_1", cardId: "sneaky_pete", exhaustState: "ready" },
-        { instanceId: "activist_a_1", cardId: "activist_a", exhaustState: "exhausted" },
-        { instanceId: "farmer_a_1",   cardId: "farmer_a",   exhaustState: "ready" },
-      ],
-      partnerships: { law_firm: true, business: false, investment: true },
-      waterBank: { unlocked: true, stored: 2 },
-      projects: {
-        citizen: {
-          farm:         { watered: 4, water_slots: 6 },
-          housing:      { watered: 4, water_slots: 4 },
-          firefighting: { watered: 1, water_slots: 2 },
-        },
-        income: {
-          factory:    { watered: 3, water_slots: 6 },
-          vineyard:   { watered: 0, water_slots: 4 },
-          recreation: { watered: 2, water_slots: 2 },
-        },
-      },
-    },
-    p2: {
-      id: "p2", factionId: "california", name: "California", isAI: false,
-      waterClaimTrack: { value: 14, min: 3, max: 22, vp_milestones: [{at:6,vp:1},{at:11,vp:2},{at:17,vp:3},{at:22,vp:5}], threshold_markers: [] },
-      moneyTrack:      { value: 12, min: 0, max: 19, vp_milestones: [{at:19,vp:5}], threshold_markers: [] },
-      prTrack:         { value: -3, min: -8, max: 11, vp_milestones: [{at:6,vp:2},{at:11,vp:5}],
-                         threshold_markers: [{at:-7,effect:"free_lawyer_acquisition"},{at:8,effect:"free_lawyer_acquisition"}] },
-      vp: 7, waterCubes: 1, waterClaims: 5, protestInfluence: 0,
-      scInfluence: { "arizona_v_california": 5, "arizona_v_nevada": 0 },
-      hand: ["water_bribe", "protect_our_interests"],
-      tableau: [
-        { instanceId: "pro_bono_1",   cardId: "pro_bono_attorney", exhaustState: "ready" },
-        { instanceId: "activist_b_1", cardId: "activist_b",        exhaustState: "ready" },
-      ],
-      partnerships: { law_firm: false, business: true, investment: false },
-      waterBank: { unlocked: false, stored: 0 },
-      projects: {
-        citizen: { farm: { watered: 6, water_slots: 6 }, housing: { watered: 2, water_slots: 4 }, firefighting: { watered: 0, water_slots: 2 } },
-        income:  { factory: { watered: 5, water_slots: 6 }, vineyard: { watered: 4, water_slots: 4 }, recreation: { watered: 0, water_slots: 2 } },
-      },
-    },
-    p3: {
-      id: "p3", factionId: "chemehuevi", name: "Chemehuevi", isAI: false,
-      waterClaimTrack: { value: 5, min: 3, max: 22, vp_milestones: [{at:6,vp:1},{at:11,vp:2},{at:17,vp:3},{at:22,vp:5}], threshold_markers: [] },
-      moneyTrack:      { value: 3, min: 0, max: 19, vp_milestones: [{at:19,vp:5}], threshold_markers: [] },
-      prTrack:         { value: 7, min: -8, max: 11, vp_milestones: [{at:6,vp:2},{at:11,vp:5}],
-                         threshold_markers: [{at:-7,effect:"free_lawyer_acquisition"},{at:8,effect:"free_lawyer_acquisition"}] },
-      vp: 9, waterCubes: 0, waterClaims: 3, protestInfluence: 0,
-      scInfluence: { "arizona_v_california": 0, "arizona_v_nevada": 0 },
-      hand: ["red_herring_case"],
-      tableau: [
-        { instanceId: "in_glory_1",   cardId: "in_it_for_glory", exhaustState: "ready" },
-        { instanceId: "activist_c_1", cardId: "activist_c",      exhaustState: "ready" },
-      ],
-      partnerships: { law_firm: false, business: false, investment: true },
-      waterBank: { unlocked: false, stored: 0 },
-      projects: {
-        citizen: { farm: { watered: 0, water_slots: 6 }, housing: { watered: 1, water_slots: 4 }, firefighting: { watered: 2, water_slots: 2 } },
-        income:  { factory: { watered: 0, water_slots: 6 }, vineyard: { watered: 2, water_slots: 4 }, recreation: { watered: 1, water_slots: 2 } },
-      },
-    },
-  },
-  sharedBoard: {
-    lawyerMarket: ["sneaky_pete", "team_player", null, "workaholic"],
-    lawyerDeck: ["anti_environmentalist", "in_it_for_glory", "rider_of_coattails"],
-    activistMarket: ["activist_a", "activist_b", "activist_c", "activist_d"],
-    activistDeck: [],
-    strategyDeck: ["quid_pro_quo", "lobby_federal_government"],
-    strategyDiscard: [],
-    eventDeck: ["supreme_court_session", "severe_drought", "protest_a", "large_snow_melt", "supreme_court_session"],
-    activeEvent: null,
-    docket: ["arizona_v_california", "arizona_v_nevada", "california_v_chemehuevi"],
-    waterSupply: 0,
-  },
-  actionLog: [
-    { id: 1, type: "phase_start",   phase: "event",    message: "Round 3 — Event Phase",                         timestamp: Date.now() - 240000 },
-    { id: 2, type: "event_revealed",cardId: "supreme_court_session", message: "Event revealed: Supreme Court Session", timestamp: Date.now() - 230000 },
-    { id: 3, type: "sc_case_resolved", message: "Arizona v. California: California wins (5 vs 2 influence)",     timestamp: Date.now() - 220000 },
-    { id: 4, type: "track_change",  message: "California gains 1 water claim (14 → 15)",                         timestamp: Date.now() - 215000 },
-    { id: 5, type: "vp_grant",      message: "California gains 3 VP (total: 7)",                                 timestamp: Date.now() - 210000 },
-    { id: 6, type: "phase_start",   phase: "negotiate", message: "Round 3 — Negotiate Phase — Arizona goes first", timestamp: Date.now() - 180000 },
-    { id: 7, type: "card_acquired",           message: "Arizona acquires Sneaky Pete for $7",                              timestamp: Date.now() - 90000 },
-    { id: 8, type: "incomplete_project_penalty", message: "Chemehuevi loses 1 water claim — has incomplete project(s) with water on them", timestamp: Date.now() - 30000 },
-  ],
-  pendingEffects: [],
-};
+let CARD_INDEX = {};
 
-const CARD_INDEX = {
-  sneaky_pete:           { id: "sneaky_pete", type: "lawyer", name: "Sneaky Pete", cost: 3, vp: null, pr_requirement: null,
-    actions: { N: { icon: "money", text: "Pay 1 water claim cube to gain $3" }, C: { icon: null, text: "Draw 1 Strategy card" } } },
-  team_player:           { id: "team_player", type: "lawyer", name: "Team Player", cost: 3, vp: null,
-    actions: { N: { icon: "water", text: "Pay $1 to gain 1 water cube" }, C: { icon: null, text: "A lawyer you acquire this round costs $3 less" } } },
-  workaholic:            { id: "workaholic", type: "lawyer", name: "Workaholic", cost: 1, vp: null,
-    actions: { N: null, C: { icon: "water", text: "Gain 2 water cubes instead of 1 when you would gain 1" } } },
-  pro_bono_attorney:     { id: "pro_bono_attorney", type: "lawyer", name: "Pro Bono Attorney", cost: 0, vp: null, pr_requirement: { operator: "gte", value: 6 },
-    actions: { N: { icon: "water_claim_track", text: "Gain 1 level on the water claim track" }, C: { icon: "sc_influence", text: "Gain 1 SC influence in an active case, or gain 1 VP" } } },
-  in_it_for_glory:       { id: "in_it_for_glory", type: "lawyer", name: "In It for Glory", cost: 2, vp: null, pr_requirement: { operator: "lte", value: 7 },
-    passive: { text: "Gain 1 VP each time you win a SC case" },
-    actions: { N: null, C: { icon: "sc_influence", text: "Gain 1 SC influence in an active case" } } },
-  activist_a:            { id: "activist_a", type: "activist", name: "Activist A", cost: null, vp: 0,
-    actions: { N: { icon: "water_claim", text: "Gain or Lose 1 water claim cube" }, C: { icon: "protest_influence", text: "+1 protestor influence" } } },
-  activist_b:            { id: "activist_b", type: "activist", name: "Activist B", cost: null, vp: 1,
-    actions: { N: { icon: null, text: "Add 1 Protest card to the Event deck" }, C: { icon: "protest_influence", text: "+2 protestor influence" } } },
-  activist_c:            { id: "activist_c", type: "activist", name: "Activist C", cost: null, vp: 1,
-    actions: { N: null, C: { icon: null, text: "Look at 2 Strategy cards. Draw 1, bottom the other." } } },
-  activist_d:            { id: "activist_d", type: "activist", name: "Activist D", cost: null, vp: 0,
-    actions: { N: { icon: null, text: "Gain 1 Strategy Card" }, C: { icon: "protest_influence", text: "+1 protestor influence" } } },
-  farmer_a:              { id: "farmer_a", type: "citizen", name: "Farmer A", cost: null, vp: 4,
-    actions: { N: { icon: "pr", text: "Gain 1 PR" }, C: { icon: null, text: "Your fully watered farms produce 2 extra VP this round" } } },
-  deal_with_federal_government: { id: "deal_with_federal_government", type: "strategy", name: "Deal w/ Federal Govt", cost: null, vp: null,
-    actions: { N: { icon: "money", text: "Lose 1 water claim: Gain $3" }, C: null } },
-  donate_to_sc_justice:  { id: "donate_to_sc_justice", type: "strategy", name: "Donate to SC Justice", cost: null, vp: null,
-    actions: { N: { icon: null, text: "Switch the order of any two upcoming SC cards" }, C: null } },
-  scorched_earth_negotiating: { id: "scorched_earth_negotiating", type: "strategy", name: "Scorched Earth", cost: null, vp: null,
-    actions: { N: { icon: null, text: "Pay $2 & lose 1 PR: All opponents lose 1 water cube" }, C: null } },
-  water_bribe:           { id: "water_bribe", type: "strategy", name: "Water Bribe", cost: null, vp: null,
-    actions: { N: null, C: { icon: null, text: "Give 1 water cube to an opponent: they must give you $3" } } },
-  protect_our_interests: { id: "protect_our_interests", type: "strategy", name: "Protect Our Interests", cost: null, vp: null,
-    actions: { N: { icon: null, text: "Negate the effect(s) of any 1 card played or lawyer used" }, C: null } },
-  red_herring_case:      { id: "red_herring_case", type: "strategy", name: "Red Herring Case", cost: null, vp: null,
-    actions: { N: { icon: null, text: "Choose any 2 lawyers. They cannot be used this round." }, C: null } },
-  quid_pro_quo:          { id: "quid_pro_quo", type: "strategy", name: "Quid Pro Quo", cost: null,
-    actions: { N: { icon: "water", text: "Pay $4: Gain 2 water cubes" }, C: null } },
-  lobby_federal_government: { id: "lobby_federal_government", type: "strategy", name: "Lobby Federal Govt", cost: null,
-    actions: { N: { icon: "water_claim", text: "Pay $3: Gain 1 water claim" }, C: null } },
-  arizona_v_california:  { id: "arizona_v_california",  type: "sc_case", name: "Arizona v. California",  plaintiff: { id: "arizona" },    defendant: { id: "california" } },
-  arizona_v_nevada:      { id: "arizona_v_nevada",      type: "sc_case", name: "Arizona v. Nevada",      plaintiff: { id: "arizona" },    defendant: { id: "nevada" } },
-  california_v_chemehuevi: { id: "california_v_chemehuevi", type: "sc_case", name: "California v. Chemehuevi", plaintiff: { id: "california" }, defendant: { id: "chemehuevi" } },
-  supreme_court_session: { id: "supreme_court_session", type: "event", name: "Supreme Court Session" },
-  severe_drought:        { id: "severe_drought",        type: "event", name: "Severe Drought" },
-  protest_a:             { id: "protest_a",             type: "event", name: "Protest A" },
-  large_snow_melt:       { id: "large_snow_melt",       type: "event", name: "Large Snow Melt" },
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -291,24 +140,19 @@ const CARD_COLORS = {
   event: "var(--event)", sc_case: "var(--gold)",
 };
 
-// ── Lawyer cost helpers (mirrors trackManager.js logic) ─────────────────────
-const PR_FREE_THRESHOLDS = [-7, 8];  // PR values that waive the $4 surcharge
-const LAWYER_SURCHARGE   = 4;
-
+// ── Lawyer cost (engine is the source of truth — PR surcharge waived at or
+//    beyond the −7 / +8 thresholds, see trackManager.prWaivesSurcharge) ──────
 function uiLawyerCost(cardDef, currentPr, pendingDiscount = 0) {
   if (!cardDef) return 0;
-  const atThreshold = PR_FREE_THRESHOLDS.includes(currentPr);
-  const base = cardDef.cost + (atThreshold ? 0 : LAWYER_SURCHARGE);
-  return Math.max(0, base - pendingDiscount);
+  return Math.max(0, lawyerAcquisitionCost(cardDef, currentPr) - pendingDiscount);
 }
 
-function uiCanAcquireWithPr(cardDef, currentPr) {
-  if (!cardDef?.pr_requirement) return true;
-  const { operator, value } = cardDef.pr_requirement;
-  if (operator === 'lte') return currentPr <= value;
-  if (operator === 'gte') return currentPr >= value;
-  return true;
-}
+// Flat per-use fee of the market partnership abilities (RULES §14)
+const PARTNERSHIP_ABILITY_FEES = { lawyer: 4, activist: 3 };
+
+// Zoom steps for the PhaseBar zoom control (%; persisted to localStorage)
+const ZOOM_STEPS = [60, 70, 80, 90, 100, 110, 125, 150];
+const ZOOM_STORAGE_KEY = "lotr-zoom";
 
 const FACTION_COLORS = {
   arizona: "#c4612a", california: "#3d8fa8", nevada: "#c8a550",
@@ -425,8 +269,10 @@ function CardFace({
   const locked    = exhaustState === "locked";
   const disabled  = exhausted || locked || !canPlay;
 
+  // PR requirement gates ACQUISITION only — the badge below is informational,
+  // it never blocks using a card already in the tableau (RULES §7).
   const prOk = satisfiesPrRequirement(def.pr_requirement, prValue ?? 0);
-  const cardDisabled = disabled || !prOk;
+  const cardDisabled = disabled;
 
   const cls = ["card-face", exhausted && "exhausted", locked && "locked"].filter(Boolean).join(" ");
 
@@ -445,7 +291,6 @@ function CardFace({
           locked    ? "Card is locked (Red Herring)" :
           exhausted ? "Card already used this round" :
           !canPlay  ? "Not your turn" :
-          !prOk     ? `PR requirement not met (need ${def.pr_requirement?.operator === "gte" ? "≥" : "≤"} ${def.pr_requirement?.value})` :
           undefined
         }
         onClick={e => { e.stopPropagation(); if (!sideDisabled && onPlay) onPlay(side); }}
@@ -460,7 +305,7 @@ function CardFace({
           borderRadius: 2,
           color: sideDisabled ? "var(--t4)" : hoverColor,
           fontFamily: "'Courier Prime', 'Courier New', monospace",
-          fontSize: 8,
+          fontSize: 10,
           letterSpacing: "0.14em",
           textTransform: "uppercase",
           cursor: sideDisabled ? "not-allowed" : "pointer",
@@ -490,7 +335,7 @@ function CardFace({
       {/* PR requirement badge */}
       {def.pr_requirement && (
         <div style={{ padding: "2px 7px", background: "var(--bg4)", borderBottom: "1px solid var(--b1)" }}>
-          <span className="f-mono" style={{ fontSize: 8, color: prOk ? "var(--t3)" : "var(--pr-neg)" }}>
+          <span className="f-mono" style={{ fontSize: 9, color: prOk ? "var(--t3)" : "var(--pr-neg)" }}>
             PR {def.pr_requirement.operator === "gte" ? "≥" : "≤"} {def.pr_requirement.value}
             {!prOk && " ✗"}
           </span>
@@ -522,7 +367,7 @@ function CardFace({
           minHeight: 36,
           background: showN ? "var(--bg3)" : undefined,
         }}>
-          <div className="f-mono" style={{ fontSize: 8, color: showN ? "var(--terra)" : "var(--t3)", marginBottom: 2 }}>N ·</div>
+          <div className="f-mono" style={{ fontSize: 9, color: showN ? "var(--terra)" : "var(--t3)", marginBottom: 2 }}>N ·</div>
           <div className="f-body" style={{ fontSize: 10, color: "var(--t2)", lineHeight: 1.35 }}>
             {def.actions.N.icon && <span style={{ marginRight: 3 }}>{ACTION_ICONS[def.actions.N.icon] || def.actions.N.icon}</span>}
             {def.actions.N.text}
@@ -531,7 +376,7 @@ function CardFace({
         </div>
       ) : (
         <div style={{ padding: "5px 7px", borderBottom: def.actions?.C ? "1px solid var(--b0)" : "none", minHeight: 36 }}>
-          <div className="f-mono" style={{ fontSize: 8, color: "var(--t4)" }}>N · —</div>
+          <div className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>N · —</div>
         </div>
       )}
 
@@ -542,7 +387,7 @@ function CardFace({
           minHeight: 36,
           background: showC ? "var(--bg3)" : undefined,
         }}>
-          <div className="f-mono" style={{ fontSize: 8, color: showC ? "var(--water)" : "var(--t3)", marginBottom: 2 }}>C ·</div>
+          <div className="f-mono" style={{ fontSize: 9, color: showC ? "var(--water)" : "var(--t3)", marginBottom: 2 }}>C ·</div>
           <div className="f-body" style={{ fontSize: 10, color: "var(--t2)", lineHeight: 1.35 }}>
             {def.actions.C.icon && <span style={{ marginRight: 3 }}>{ACTION_ICONS[def.actions.C.icon] || def.actions.C.icon}</span>}
             {def.actions.C.text}
@@ -569,11 +414,13 @@ function CardFace({
  *   phase           string
  *   marketType      'lawyer' | 'activist'
  *   activePlayer    full player state (for PR, money, partnerships, pendingLawyerDiscount)
+ *   partnershipFlow pending_partnership_acquire effect open for activePlayer, or null.
+ *                   While open, the flat ability fee is shown as the price.
  *   onAcquire       fn(marketIndex)
  */
 function MarketGrid({
   slots, label, deckCount,
-  isActivePlayer = false, phase, marketType, activePlayer, onAcquire,
+  isActivePlayer = false, phase, marketType, activePlayer, partnershipFlow = null, onAcquire,
 }) {
   const inActionPhase = phase === 'negotiate' || phase === 'consume';
   const showButtons   = isActivePlayer && inActionPhase && !!activePlayer;
@@ -584,7 +431,7 @@ function MarketGrid({
         <Label style={{ margin: 0 }}>{label}</Label>
         {showButtons && marketType === "lawyer" && (activePlayer?.pendingLawyerDiscount ?? 0) > 0 && (
           <span className="f-mono" style={{
-            fontSize: 8, color: "var(--gold)",
+            fontSize: 9, color: "var(--gold)",
             padding: "1px 6px", border: "1px solid var(--gold-dim)",
             borderRadius: 2, marginLeft: 6,
           }}>
@@ -614,8 +461,11 @@ function MarketGrid({
             const pr      = activePlayer.prTrack?.value ?? 0;
             const money   = activePlayer.moneyTrack?.value ?? 0;
             const disc    = activePlayer.pendingLawyerDiscount ?? 0;
-            cost = uiLawyerCost(cardDef, pr, disc);
-            const prOk = uiCanAcquireWithPr(cardDef, pr);
+            // Law Firm flow open → flat ability fee (minus Team Player discount)
+            cost = partnershipFlow
+              ? Math.max(0, PARTNERSHIP_ABILITY_FEES.lawyer - disc)
+              : uiLawyerCost(cardDef, pr, disc);
+            const prOk = canAcquireWithPr(cardDef, pr);
             if (!prOk)             { reason = 'PR req not met'; }
             else if (money < cost) { reason = `Need $${cost}`; }
             else                   { canAcquire = true; }
@@ -624,7 +474,7 @@ function MarketGrid({
           if (showButtons && marketType === 'activist') {
             const hasBusiness = activePlayer.partnerships?.business;
             const money       = activePlayer.moneyTrack?.value ?? 0;
-            cost = 3;
+            cost = PARTNERSHIP_ABILITY_FEES.activist;
             if (!hasBusiness)      { reason = 'Need Business'; }
             else if (money < cost) { reason = `Need $${cost}`; }
             else                   { canAcquire = true; }
@@ -648,7 +498,7 @@ function MarketGrid({
                     borderRadius:  2,
                     color:         canAcquire ? accentColor : 'var(--t4)',
                     fontFamily:    "'Courier Prime', monospace",
-                    fontSize:      8,
+                    fontSize:      10,
                     letterSpacing: '0.1em',
                     textTransform: 'uppercase',
                     padding:       '2px 0',
@@ -697,7 +547,7 @@ function DocketQueue({ docket, scInfluenceByPlayer, playerOrder, players }) {
                   const inf = players[pid].scInfluence?.[caseId] ?? 0;
                   if (inf === 0) return null;
                   return (
-                    <span key={pid} className="f-mono" style={{ fontSize: 8, color: FACTION_COLORS[players[pid].factionId] || "var(--t3)" }}>
+                    <span key={pid} className="f-mono" style={{ fontSize: 9, color: FACTION_COLORS[players[pid].factionId] || "var(--t3)" }}>
                       {players[pid].name.slice(0, 3).toUpperCase()}: {inf}
                     </span>
                   );
@@ -754,7 +604,7 @@ function ProjectGroup({ type, projects, isActivePlayer=false, phase, waterClaims
                 ))}
               </div>
               <span className="f-mono" style={{ fontSize: 9, color: def.rewardColor }}>{def.reward}</span>
-              {isFull && <span className="f-mono" style={{ fontSize: 8, color: "var(--water-bright)" }}>✓</span>}
+              {isFull && <span className="f-mono" style={{ fontSize: 9, color: "var(--water-bright)" }}>✓</span>}
               {isPartial && !isFull && (
                 <span className="f-mono"
                   title="Partial — you will lose 1 Water Rights at End Step"
@@ -771,7 +621,7 @@ function ProjectGroup({ type, projects, isActivePlayer=false, phase, waterClaims
                     border: "1px solid var(--water-bright)",
                     borderRadius: 2, color: "var(--water-bright)",
                     fontFamily: "'Courier Prime',monospace",
-                    fontSize: 9, padding: "1px 7px",
+                    fontSize: 10, padding: "1px 7px",
                     cursor: "pointer", transition: "all 0.12s",
                     flexShrink: 0,
                   }}>
@@ -811,7 +661,7 @@ function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pend
       <Label>Partnerships</Label>
       {pendingLawyerDiscount > 0 && (
         <div className="f-mono" style={{
-          fontSize: 8, color: "var(--gold)", padding: "2px 8px",
+          fontSize: 9, color: "var(--gold)", padding: "2px 8px",
           border: "1px solid var(--gold-dim)", borderRadius: 2,
           marginBottom: 5, letterSpacing: "0.08em",
         }}>
@@ -829,10 +679,10 @@ function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pend
               style={{ flex: 1, padding: "6px 8px", borderRadius: 2, textAlign: "center" }}>
               <div style={{ fontSize: 14, marginBottom: 3 }}>{p.icon}</div>
               <div className="f-display" style={{
-                fontSize: 8, marginBottom: 2,
+                fontSize: 9, marginBottom: 2,
                 color: owned ? "var(--gold)" : "var(--t3)",
               }}>{p.label}</div>
-              <div className="f-mono" style={{ fontSize: 8, color: owned ? "var(--t2)" : "var(--t4)", marginBottom: 4 }}>
+              <div className="f-mono" style={{ fontSize: 9, color: owned ? "var(--t2)" : "var(--t4)", marginBottom: 4 }}>
                 {owned ? p.ability : `Buy: $${p.buyCost}`}
               </div>
 
@@ -849,7 +699,7 @@ function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pend
                     border: `1px solid ${canAffordBuy ? "var(--gold)" : "var(--b1)"}`,
                     borderRadius: 2,
                     color: canAffordBuy ? "var(--gold)" : "var(--t4)",
-                    fontFamily: "'Courier Prime', monospace", fontSize: 8,
+                    fontFamily: "'Courier Prime', monospace", fontSize: 10,
                     letterSpacing: "0.1em", textTransform: "uppercase",
                     cursor: canAffordBuy ? "pointer" : "not-allowed",
                     opacity: canAffordBuy ? 1 : 0.45,
@@ -872,7 +722,7 @@ function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pend
                     border: `1px solid ${canAffordUse ? "var(--gold-dim)" : "var(--b1)"}`,
                     borderRadius: 2,
                     color: canAffordUse ? "var(--gold)" : "var(--t4)",
-                    fontFamily: "'Courier Prime', monospace", fontSize: 8,
+                    fontFamily: "'Courier Prime', monospace", fontSize: 10,
                     letterSpacing: "0.1em", textTransform: "uppercase",
                     cursor: canAffordUse ? "pointer" : "not-allowed",
                     opacity: canAffordUse ? 1 : 0.45,
@@ -907,12 +757,12 @@ function WaterBankWidget({
 }) {
   const { unlocked, stored } = waterBank;
   const canAffordUnlock = (player?.moneyTrack?.value ?? 0) >= 8;
-  const hasCubes        = (player?.waterCubes ?? 0) > 0;
   const canWithdraw     = unlocked && stored > 0;
 
-  // Other players with unlocked banks this player could deposit into
-  const otherBanks = playerOrder
-    .filter(pid => pid !== player?.id && allPlayers[pid]?.waterBank?.unlocked)
+  // ANY unlocked bank accepts deposits — including the depositor's own
+  // (RULES §15: ANY player may deposit, paying the owner $1 per cube)
+  const depositBanks = playerOrder
+    .filter(pid => allPlayers[pid]?.waterBank?.unlocked)
     .map(pid => allPlayers[pid]);
 
   return (
@@ -927,7 +777,7 @@ function WaterBankWidget({
           <div className="f-display" style={{ fontSize: 9, color: unlocked ? "var(--water)" : "var(--t4)" }}>
             Water Bank
           </div>
-          <div className="f-mono" style={{ fontSize: 8, color: "var(--t4)" }}>
+          <div className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>
             {unlocked ? `${stored}/9 stored` : "$8 to unlock"}
           </div>
         </div>
@@ -968,22 +818,28 @@ function WaterBankWidget({
             </button>
           )}
 
-          {/* Deposit into OTHER players' banks */}
-          {otherBanks.map(owner => {
-            const space = 9 - owner.waterBank.stored;
-            const depositCount = Math.min(space, player?.waterCubes ?? 0);
-            const cost = depositCount * 1;
-            const canDeposit = depositCount > 0 && (player?.moneyTrack?.value ?? 0) >= cost && hasCubes;
+          {/* Deposit 1 cube for $1 into any unlocked bank (own bank included) */}
+          {depositBanks.map(owner => {
+            const isOwn      = owner.id === player?.id;
+            const hasSpace   = owner.waterBank.stored < 9;
+            const canDeposit = hasSpace
+              && (player?.waterCubes ?? 0) >= 1
+              && (player?.moneyTrack?.value ?? 0) >= 1;
+            const reason = !hasSpace ? "Bank is full"
+              : (player?.waterCubes ?? 0) < 1 ? "Need 1 water cube"
+              : "Need $1";
             return (
               <button
                 key={owner.id}
                 disabled={!canDeposit}
                 onClick={() => canDeposit && onDeposit?.(owner.id, 1)}
-                title={canDeposit ? `Deposit 1 cube to ${owner.name}'s bank ($1)` : `Can't deposit`}
+                title={canDeposit
+                  ? `Deposit 1 cube into ${isOwn ? "your own" : `${owner.name}'s`} bank ($1)`
+                  : reason}
                 onMouseEnter={e => { if (canDeposit) e.currentTarget.style.background = "var(--water)11"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
                 style={miniBtn(canDeposit ? "var(--water-dim)" : null)}>
-                +1 → {owner.name.slice(0, 6)}
+                +1 → {isOwn ? "own bank" : owner.name.slice(0, 6)}
               </button>
             );
           })}
@@ -1002,7 +858,7 @@ function miniBtn(color) {
     border: `1px solid ${c}`,
     borderRadius: 2, color: c,
     fontFamily: "'Courier Prime', monospace",
-    fontSize: 8, letterSpacing: "0.1em",
+    fontSize: 10, letterSpacing: "0.1em",
     textTransform: "uppercase",
     cursor: color ? "pointer" : "not-allowed",
     opacity: color ? 1 : 0.4,
@@ -1018,20 +874,12 @@ function miniBtn(color) {
  * PlayerBoard
  *
  * Extra props for interactive mode:
- *   isActivePlayer  boolean          — true when this player is the active player this turn
- *   phase           string           — current game phase
- *   onPlayCard      fn(cardId, side) — fires when a tableau card play button is clicked
- */
-/**
- * PlayerBoard
- *
- * Extra props for interactive mode:
- *   isActivePlayer  boolean
+ *   isActivePlayer  boolean      — this player is active AND this client controls the seat
  *   phase           string
  *   activeCaseId    string|null  — docket[0], for SC influence buttons
  *   allPlayers      object       — full players map (for water bank deposits)
  *   playerOrder     string[]
- *   onPlayCard      fn(cardId, side)
+ *   onPlayCard      fn(cardId, side, instanceId)
  *   onBuyPartnership   fn(partnershipId)
  *   onUsePartnership   fn(partnershipId)
  *   onUnlockBank       fn()
@@ -1169,7 +1017,7 @@ function PlayerBoard({
                   borderRadius: 2,
                   color: (player.waterCubes ?? 0) >= 1 ? "var(--gold)" : "var(--t4)",
                   fontFamily: "'Courier Prime', monospace",
-                  fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+                  fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
                   padding: "3px 10px",
                   cursor: (player.waterCubes ?? 0) >= 1 ? "pointer" : "not-allowed",
                   opacity: (player.waterCubes ?? 0) >= 1 ? 1 : 0.4,
@@ -1199,7 +1047,7 @@ function PlayerBoard({
                 phase={phase}
                 prValue={prValue}
                 canPlay={isActivePlayer}
-                onPlay={(side) => onPlayCard?.(instance.cardId, side)}
+                onPlay={(side) => onPlayCard?.(instance.cardId, side, instance.instanceId)}
               />
             ))}
           </div>
@@ -1216,19 +1064,20 @@ function PlayerBoard({
 /**
  * StrategyHand
  *
- * Renders strategy cards held in the active player's hand.
- * In action_n phase, each card shows a "Play" button that fires onPlayStrategy.
+ * Renders strategy cards held in the viewed player's hand.
+ * Side-aware: a "Play N" button appears in Negotiate only for cards with an
+ * N action; "Play C" in Consume only for cards with a C action (cards.json is
+ * the source of truth — most strategy cards are N-only, water_bribe is C-only).
  *
  * Props
- *   hand             string[]         — array of cardIds
- *   isActivePlayer   boolean
+ *   hand             string[]           — array of cardIds
+ *   isActivePlayer   boolean            — viewed player is active AND controlled by this client
+ *   showFaces        boolean            — false → render face-down backs (online hidden info)
  *   phase            string
- *   onPlayStrategy   fn(cardId)       — plays the card as its N-side action
+ *   waterCubes       number             — viewed player's cubes (water_bribe gating)
+ *   onPlayStrategy   fn(cardId, side)   — plays the card on the given side
  */
-function StrategyHand({ hand, isActivePlayer = false, phase, onPlayStrategy }) {
-  const showPlayN = isActivePlayer && phase === "negotiate";
-  const showPlayC = isActivePlayer && phase === "consume";
-
+function StrategyHand({ hand, isActivePlayer = false, showFaces = true, phase, waterCubes = 0, onPlayStrategy }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "10px 16px",
         background: "var(--bg1)", borderTop: "1px solid var(--b0)", minHeight: 72, overflowX: "auto" }}>
@@ -1238,33 +1087,55 @@ function StrategyHand({ hand, isActivePlayer = false, phase, onPlayStrategy }) {
       </div>
       {hand.length === 0 ? (
         <span className="f-mono" style={{ fontSize: 10, color: "var(--t4)" }}>— no strategy cards —</span>
+      ) : !showFaces ? (
+        // Hidden information (online play): face-down backs + count only
+        hand.map((_, i) => (
+          <div key={i} style={{
+            width: 120, height: 64, flexShrink: 0, borderRadius: 3,
+            border: "1px solid var(--b2)", background: "var(--bg3)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <span className="f-display" style={{ fontSize: 10, color: "var(--t4)", letterSpacing: "0.12em" }}>
+              ◆ ◆ ◆
+            </span>
+          </div>
+        ))
       ) : (
         hand.map((cardId, i) => {
-          const def = CARD_INDEX[cardId];
+          const def  = CARD_INDEX[cardId];
+          const side = phase === "negotiate" ? "N" : phase === "consume" ? "C" : null;
+          const hasAction = side && !!def?.actions?.[side];
+          // water_bribe C: needs a cube to give away
+          const needsCube  = cardId === "water_bribe" && side === "C" && waterCubes < 1;
+          const canPlay    = isActivePlayer && hasAction && !needsCube;
+          const showButton = isActivePlayer && hasAction;
           return (
             <div key={`${cardId}_${i}`} style={{ position: "relative", flexShrink: 0 }}>
               <CardFace cardId={cardId} exhaustState="ready" width={120} />
-              {(showPlayN || showPlayC) && def && (
+              {showButton && (
                 <button
-                  onClick={() => onPlayStrategy?.(cardId)}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--strategy)22"; }}
+                  disabled={!canPlay}
+                  title={needsCube ? "Needs 1 water cube" : `Play ${side}-side action`}
+                  onClick={() => canPlay && onPlayStrategy?.(cardId, side)}
+                  onMouseEnter={e => { if (canPlay) e.currentTarget.style.background = "var(--strategy)22"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
                   style={{
                     marginTop: 3,
                     width: "100%",
                     padding: "3px 0",
                     background: "transparent",
-                    border: "1px solid var(--strategy)",
+                    border: `1px solid ${canPlay ? "var(--strategy)" : "var(--b1)"}`,
                     borderRadius: 2,
-                    color: "var(--strategy)",
+                    color: canPlay ? "var(--strategy)" : "var(--t4)",
                     fontFamily: "'Courier Prime', 'Courier New', monospace",
-                    fontSize: 8,
+                    fontSize: 10,
                     letterSpacing: "0.14em",
                     textTransform: "uppercase",
-                    cursor: "pointer",
+                    cursor: canPlay ? "pointer" : "not-allowed",
+                    opacity: canPlay ? 1 : 0.45,
                     transition: "all 0.12s",
                   }}>
-                  Play
+                  Play {side}
                 </button>
               )}
             </div>
@@ -1279,9 +1150,20 @@ function StrategyHand({ hand, isActivePlayer = false, phase, onPlayStrategy }) {
 // PHASE BAR  (top)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PhaseBar({ state, activePlayer, canUndo, canRedo, onUndo, onRedo, children }) {
+function PhaseBar({ state, activePlayer, canUndo, canRedo, onUndo, onRedo,
+    mode = "local", roomCode = null, guestConnected = true,
+    zoom = 100, onZoomIn, onZoomOut, children }) {
   const phaseIdx = PHASE_ORDER.indexOf(state.phase);
   const fColor   = FACTION_COLORS[activePlayer?.factionId] || "var(--terra)";
+
+  const zoomBtn = (enabled) => ({
+    background: "transparent", border: "1px solid var(--b2)", borderRadius: 2,
+    color: enabled ? "var(--t2)" : "var(--t4)",
+    fontFamily: "'Courier Prime', monospace", fontSize: 11, lineHeight: 1,
+    width: 20, height: 20, padding: 0,
+    cursor: enabled ? "pointer" : "not-allowed",
+    opacity: enabled ? 1 : 0.4, transition: "all 0.12s",
+  });
 
   return (
     <div style={{ height: 44, background: "var(--bg1)", borderBottom: "1px solid var(--b0)",
@@ -1291,6 +1173,22 @@ function PhaseBar({ state, activePlayer, canUndo, canRedo, onUndo, onRedo, child
       <span className="f-display" style={{ fontSize: 11, color: "var(--gold)", letterSpacing: "0.12em", whiteSpace: "nowrap" }}>
         Law of the River
       </span>
+
+      {/* Room code chip (online play) */}
+      {mode !== "local" && roomCode && (
+        <span className="f-mono" title={mode === "host" ? "You are hosting this room" : "Connected room"}
+          style={{ fontSize: 9, color: "var(--gold)", letterSpacing: "0.12em",
+            border: "1px solid var(--gold-dim)", borderRadius: 2, padding: "2px 7px",
+            display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+          ROOM {roomCode}
+          {mode === "guest" && (
+            <span title={guestConnected ? "Connected to host" : "Disconnected from host"}
+              style={{ width: 6, height: 6, borderRadius: "50%",
+                background: guestConnected ? "var(--pr-pos)" : "var(--pr-neg)",
+                boxShadow: `0 0 5px ${guestConnected ? "var(--pr-pos)" : "var(--pr-neg)"}` }} />
+          )}
+        </span>
+      )}
 
       <div style={{ width: 1, height: 20, background: "var(--b1)" }} />
 
@@ -1322,8 +1220,28 @@ function PhaseBar({ state, activePlayer, canUndo, canRedo, onUndo, onRedo, child
         <style>{`@keyframes pulsedot { 0%,100% { opacity:1 } 50% { opacity:0.4 } }`}</style>
       </div>
 
-      {/* Phase controls (End Turn / Advance) */}
+      {/* Phase controls (Pass / Advance) + zoom */}
       <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+        {/* Zoom control */}
+        <div style={{ display: "flex", alignItems: "center", gap: 3, marginRight: 4 }}>
+          <button
+            title="Zoom out"
+            disabled={zoom <= ZOOM_STEPS[0]}
+            onClick={onZoomOut}
+            style={zoomBtn(zoom > ZOOM_STEPS[0])}>
+            −
+          </button>
+          <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", minWidth: 30, textAlign: "center" }}>
+            {zoom}%
+          </span>
+          <button
+            title="Zoom in"
+            disabled={zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+            onClick={onZoomIn}
+            style={zoomBtn(zoom < ZOOM_STEPS[ZOOM_STEPS.length - 1])}>
+            +
+          </button>
+        </div>
         {canUndo && (
           <button
             onClick={onUndo}
@@ -1371,10 +1289,11 @@ function formatTime(ts) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function ActionLog({ log, pendingEffects }) {
+function ActionLog({ log, pendingEffects, onCancelPartnership, canControl = () => true }) {
   const logRef = useRef(null);
+  // Entries render newest-first, so new activity appears at the TOP
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    if (logRef.current) logRef.current.scrollTop = 0;
   }, [log.length]);
 
   return (
@@ -1403,6 +1322,24 @@ function ActionLog({ log, pendingEffects }) {
                 <div className="f-body" style={{ fontSize: 11, color: "var(--t2)", lineHeight: 1.4 }}>
                   {e.message}
                 </div>
+                {isPartnershipAcquire && canControl(e.playerId) && (
+                  <button
+                    onClick={() => onCancelPartnership?.(e.playerId)}
+                    title="Cancel — no fee has been charged yet"
+                    onMouseEnter={ev => { ev.currentTarget.style.background = "var(--terra)22"; }}
+                    onMouseLeave={ev => { ev.currentTarget.style.background = "transparent"; }}
+                    style={{
+                      marginTop: 6, padding: "3px 10px",
+                      background: "transparent",
+                      border: "1px solid var(--terra-dim)",
+                      borderRadius: 2, color: "var(--terra)",
+                      fontFamily: "'Courier Prime', monospace",
+                      fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                      cursor: "pointer", transition: "all 0.12s",
+                    }}>
+                    ✕ Cancel
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1420,9 +1357,9 @@ function ActionLog({ log, pendingEffects }) {
           <div key={entry.id} className="log-row"
             style={{ marginBottom: 5, borderColor: LOG_COLORS[entry.type] || LOG_COLORS.default }}>
             <div style={{ display: "flex", gap: 6, marginBottom: 2, alignItems: "baseline" }}>
-              <span className="f-mono" style={{ fontSize: 8, color: "var(--t4)" }}>{formatTime(entry.timestamp)}</span>
+              <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>{formatTime(entry.timestamp)}</span>
               {entry.type === "phase_start" && (
-                <span className="f-mono" style={{ fontSize: 8, color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
                   — {PHASE_LABELS[entry.phase] || entry.phase} —
                 </span>
               )}
@@ -1444,13 +1381,11 @@ function ActionLog({ log, pendingEffects }) {
 function SharedBoardPanel({
   sharedBoard, playerOrder, players,
   isActivePlayer = false, phase, activePlayer,
+  partnershipFlows = {},
   onAcquireLawyer, onAcquireActivist,
 }) {
   const { lawyerMarket, lawyerDeck, activistMarket, activistDeck,
           eventDeck, strategyDeck, strategyDiscard, docket } = sharedBoard;
-
-  const nextEvent = eventDeck[0];
-  const nextEventDef = CARD_INDEX[nextEvent];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0, height: "100%", overflowY: "auto", padding: "12px 10px" }}>
@@ -1458,27 +1393,30 @@ function SharedBoardPanel({
       <MarketGrid
         label="Lawyer Market" slots={lawyerMarket} deckCount={lawyerDeck.length}
         isActivePlayer={isActivePlayer} phase={phase} marketType="lawyer"
-        activePlayer={activePlayer} onAcquire={onAcquireLawyer}
+        activePlayer={activePlayer} partnershipFlow={partnershipFlows.lawyer ?? null}
+        onAcquire={onAcquireLawyer}
       />
       <Divider />
       <MarketGrid
         label="Activist Market" slots={activistMarket} deckCount={activistDeck.length}
         isActivePlayer={isActivePlayer} phase={phase} marketType="activist"
-        activePlayer={activePlayer} onAcquire={onAcquireActivist}
+        activePlayer={activePlayer} partnershipFlow={partnershipFlows.activist ?? null}
+        onAcquire={onAcquireActivist}
       />
       <Divider />
       <DocketQueue docket={docket} playerOrder={playerOrder} players={players} />
       <Divider />
 
-      {/* Event Deck */}
+      {/* Event Deck — face-down: the next event is hidden information */}
       <div>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
           <Label style={{ margin: 0 }}>Event Deck</Label>
           <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)", marginLeft: "auto" }}>{eventDeck.length} left</span>
         </div>
         <div style={{ padding: "7px 9px", border: "1px solid var(--b1)", borderRadius: 2, background: "var(--bg3)" }}>
-          <div className="f-mono" style={{ fontSize: 8, color: "var(--t4)", marginBottom: 3 }}>Next event:</div>
-          <div className="f-display" style={{ fontSize: 10, color: "var(--event)" }}>{nextEventDef?.name || "—"}</div>
+          <div className="f-display" style={{ fontSize: 10, color: "var(--event)" }}>
+            {eventDeck.length > 0 ? `${eventDeck.length} card${eventDeck.length !== 1 ? "s" : ""} face-down` : "— empty —"}
+          </div>
         </div>
       </div>
 
@@ -1489,11 +1427,11 @@ function SharedBoardPanel({
         <Label>Strategy Deck</Label>
         <div style={{ display: "flex", gap: 8 }}>
           <div style={{ padding: "5px 9px", border: "1px solid var(--b1)", borderRadius: 2, background: "var(--bg3)", flex: 1 }}>
-            <div className="f-mono" style={{ fontSize: 8, color: "var(--t4)" }}>Draw</div>
+            <div className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>Draw</div>
             <div className="f-mono" style={{ fontSize: 16, color: "var(--strategy)" }}>{strategyDeck.length}</div>
           </div>
           <div style={{ padding: "5px 9px", border: "1px solid var(--b1)", borderRadius: 2, background: "var(--bg3)", flex: 1 }}>
-            <div className="f-mono" style={{ fontSize: 8, color: "var(--t4)" }}>Discard</div>
+            <div className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>Discard</div>
             <div className="f-mono" style={{ fontSize: 16, color: "var(--t3)" }}>{strategyDiscard.length}</div>
           </div>
         </div>
@@ -1531,8 +1469,19 @@ function SharedBoardPanel({
  *   rider_coattails_lawyer     — pick one of own lawyers activated this phase
  *   rider_coattails_case       — pick a won SC case from the docket
  *   negate_card_or_lawyer      — pick any card/lawyer in play to negate
+ *
+ * Multiplayer props:
+ *   canInteract        boolean — this client controls effect.playerId's seat
+ *   canResolveProtest  boolean — host/local only (table-level resolution)
+ *   canControlSeat     fn(pid) — per-seat check (protest activist buttons)
+ *   protestActivations object  — { [pid]: true } once a player used an activist
+ *   onActivateProtestActivist fn(pid, instanceId)
  */
-function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
+function ChoiceResolutionModal({
+  effect, state, onResolve, onUndo, canUndo,
+  canInteract = true, canResolveProtest = true, canControlSeat = () => true,
+  protestActivations = {}, onActivateProtestActivist,
+}) {
   const [selA, setSelA] = useState(null);
   const [selB, setSelB] = useState(null);
 
@@ -1542,10 +1491,12 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
   const fColor = FACTION_COLORS[player?.factionId] || 'var(--terra)';
 
   // ── Shared chrome ──────────────────────────────────────────────────────────
+  // A blocking choice must block the WHOLE screen (fixed overlay above the
+  // phase bar, markets and hand — nothing else is clickable until resolved).
   function Modal({ title, subtitle, children }) {
     return (
       <div style={{
-        position: 'absolute', inset: 0, zIndex: 110,
+        position: 'fixed', inset: 0, zIndex: 150,
         background: 'rgba(13,11,8,0.88)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 24,
@@ -1599,24 +1550,26 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
     );
   }
 
-  // Shared confirm button
-  function ConfirmBtn({ label, disabled, onClick }) {
+  // Shared confirm button — inert unless this client may act on the choice
+  function ConfirmBtn({ label, disabled, onClick, allowed = canInteract }) {
+    const isDisabled = disabled || !allowed;
     return (
       <button
-        disabled={disabled}
+        disabled={isDisabled}
         onClick={onClick}
-        onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = 'var(--terra)'; e.currentTarget.style.color = '#fff'; }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = disabled ? 'var(--t4)' : 'var(--terra)'; }}
+        title={!allowed ? `Waiting for ${player?.name ?? 'another player'} to choose` : undefined}
+        onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.background = 'var(--terra)'; e.currentTarget.style.color = '#fff'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = isDisabled ? 'var(--t4)' : 'var(--terra)'; }}
         style={{
           marginTop: 16, padding: '6px 20px',
           background: 'none',
-          border: `1px solid ${disabled ? 'var(--b1)' : 'var(--terra)'}`,
+          border: `1px solid ${isDisabled ? 'var(--b1)' : 'var(--terra)'}`,
           borderRadius: 2,
-          color: disabled ? 'var(--t4)' : 'var(--terra)',
+          color: isDisabled ? 'var(--t4)' : 'var(--terra)',
           fontFamily: "'Courier Prime', monospace",
           fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.45 : 1,
+          cursor: isDisabled ? 'not-allowed' : 'pointer',
+          opacity: isDisabled ? 0.45 : 1,
           transition: 'all 0.15s',
         }}>
         {label}
@@ -1624,20 +1577,21 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
     );
   }
 
-  // Shared selectable card chip
+  // Shared selectable card chip — selection disabled for spectating clients
   function CardChip({ cardId, instanceId, selected, onClick, extra }) {
     const def = CARD_INDEX[cardId];
     const typeColor = CARD_COLORS[def?.type] || 'var(--t2)';
     return (
       <div
-        onClick={onClick}
+        onClick={canInteract ? onClick : undefined}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '7px 10px',
           border: `1px solid ${selected ? 'var(--terra)' : 'var(--b2)'}`,
           borderRadius: 2,
           background: selected ? 'var(--bg4)' : 'var(--bg3)',
-          cursor: 'pointer', transition: 'all 0.12s',
+          cursor: canInteract ? 'pointer' : 'default',
+          transition: 'all 0.12s',
           marginBottom: 4,
         }}>
         <div style={{ width: 6, height: 6, borderRadius: 1, background: typeColor, flexShrink: 0 }} />
@@ -1696,14 +1650,15 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
           return (
             <div
               key={`${caseId}-${idx}`}
-              onClick={() => {
+              onClick={canInteract ? () => {
                 if (selA === null) { setSelA(idx); }
                 else if (selB === null && idx !== selA) { setSelB(idx); }
                 else { setSelA(idx); setSelB(null); }
-              }}
+              } : undefined}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
-                padding: '7px 10px', borderRadius: 2, marginBottom: 4, cursor: 'pointer',
+                padding: '7px 10px', borderRadius: 2, marginBottom: 4,
+                cursor: canInteract ? 'pointer' : 'default',
                 border: `1px solid ${isSelA || isSelB ? 'var(--terra)' : 'var(--b2)'}`,
                 background: isSelA || isSelB ? 'var(--bg4)' : 'var(--bg3)',
                 transition: 'all 0.12s',
@@ -1714,7 +1669,7 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
               <span className="f-display" style={{ fontSize: 10, color: 'var(--t1)', flex: 1 }}>
                 {CARD_INDEX[caseId]?.name || caseId}
               </span>
-              {idx === 0 && <span className="f-mono" style={{ fontSize: 8, color: 'var(--terra)' }}>active</span>}
+              {idx === 0 && <span className="f-mono" style={{ fontSize: 9, color: 'var(--terra)' }}>active</span>}
             </div>
           );
         })}
@@ -1743,10 +1698,11 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
           return (
             <div
               key={pid}
-              onClick={() => setSelA(pid)}
+              onClick={canInteract ? () => setSelA(pid) : undefined}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10,
-                padding: '8px 12px', borderRadius: 2, marginBottom: 4, cursor: 'pointer',
+                padding: '8px 12px', borderRadius: 2, marginBottom: 4,
+                cursor: canInteract ? 'pointer' : 'default',
                 border: `1px solid ${selA === pid ? 'var(--terra)' : 'var(--b2)'}`,
                 background: selA === pid ? 'var(--bg4)' : 'var(--bg3)',
                 transition: 'all 0.12s',
@@ -1780,18 +1736,62 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
         {state.playerOrder.map(pid => {
           const p  = state.players[pid];
           const fC = FACTION_COLORS[p.factionId] || 'var(--t2)';
+          const activated  = !!protestActivations[pid];
+          const controlled = canControlSeat(pid);
+          // READY tableau activists whose C ability generates protest influence
+          const protestActivists = p.tableau.filter(inst => {
+            const def = CARD_INDEX[inst.cardId];
+            return def?.type === 'activist'
+              && def?.actions?.C?.icon === 'protest_influence'
+              && inst.exhaustState === 'ready';
+          });
           return (
-            <div key={pid} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '7px 10px', borderRadius: 2, marginBottom: 4,
-              border: '1px solid var(--b1)', background: 'var(--bg3)',
-            }}>
-              <div style={{ width: 7, height: 7, borderRadius: 1, background: fC }} />
-              <span className="f-body" style={{ fontSize: 12, color: 'var(--t1)', flex: 1 }}>{p.name}</span>
-              <span className="f-mono" style={{ fontSize: 14, color: 'var(--pr-pos)', fontWeight: 700 }}>
-                {p.protestInfluence ?? 0}
-              </span>
-              <span className="f-mono" style={{ fontSize: 9, color: 'var(--t4)' }}>influence</span>
+            <div key={pid} style={{ marginBottom: 6 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '7px 10px', borderRadius: 2,
+                border: '1px solid var(--b1)', background: 'var(--bg3)',
+              }}>
+                <div style={{ width: 7, height: 7, borderRadius: 1, background: fC }} />
+                <span className="f-body" style={{ fontSize: 12, color: 'var(--t1)', flex: 1 }}>{p.name}</span>
+                {activated && (
+                  <span className="f-mono" title="Already activated an activist this protest"
+                    style={{ fontSize: 9, color: 'var(--activist)' }}>✊ used</span>
+                )}
+                <span className="f-mono" style={{ fontSize: 14, color: 'var(--pr-pos)', fontWeight: 700 }}>
+                  {p.protestInfluence ?? 0}
+                </span>
+                <span className="f-mono" style={{ fontSize: 9, color: 'var(--t4)' }}>influence</span>
+              </div>
+              {/* Activist activation buttons — only for seats this client controls,
+                  hidden once the player has used their one activist (RULES §12) */}
+              {controlled && !activated && protestActivists.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4, paddingLeft: 17 }}>
+                  {protestActivists.map(inst => {
+                    const def = CARD_INDEX[inst.cardId];
+                    const amt = parseInt(def?.actions?.C?.text?.match(/\+(\d+)/)?.[1] ?? '1', 10);
+                    return (
+                      <button
+                        key={inst.instanceId}
+                        onClick={() => onActivateProtestActivist?.(pid, inst.instanceId)}
+                        title={`Use ${def?.name}: ${def?.actions?.C?.text}`}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--activist)22'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                        style={{
+                          padding: '3px 10px',
+                          background: 'transparent',
+                          border: '1px solid var(--activist)',
+                          borderRadius: 2, color: 'var(--activist)',
+                          fontFamily: "'Courier Prime', monospace",
+                          fontSize: 10, letterSpacing: '0.06em',
+                          cursor: 'pointer', transition: 'all 0.12s',
+                        }}>
+                        ✊ Use {def?.name || inst.cardId} (+{amt})
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1800,13 +1800,14 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
           marginTop: 12, padding: '6px 10px',
           border: '1px solid var(--b2)', borderRadius: 2, lineHeight: 1.6,
         }}>
-          Activist activation is optional — you may resolve immediately if no one
-          wishes to play activists (or none are available). All players tied at the
-          lowest influence share the penalty.
+          Each player may activate at most ONE protest-influence activist —
+          activation is optional. All players tied at the lowest influence share
+          the penalty.
         </div>
         <ConfirmBtn
-          label="Resolve Protest"
+          label={canResolveProtest ? 'Resolve Protest' : 'Waiting for host to resolve…'}
           disabled={false}
+          allowed={canResolveProtest}
           onClick={() => onResolve({ subtype: effect.subtype, protestId: effect.protestId })}
         />
       </Modal>
@@ -1899,8 +1900,9 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
                 </button>
               )}
               <button
-                onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId, targetInstanceIds: [] })}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--b2)'; }}
+                disabled={!canInteract}
+                onClick={() => canInteract && onResolve({ subtype: effect.subtype, playerId: effect.playerId, targetInstanceIds: [] })}
+                onMouseEnter={e => { if (canInteract) e.currentTarget.style.background = 'var(--b2)'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                 style={{
                   flex: 1, padding: '6px 0',
@@ -1910,7 +1912,9 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
                   color: 'var(--t3)',
                   fontFamily: "'Courier Prime', monospace",
                   fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
-                  cursor: 'pointer', transition: 'all 0.15s',
+                  cursor: canInteract ? 'pointer' : 'not-allowed',
+                  opacity: canInteract ? 1 : 0.45,
+                  transition: 'all 0.15s',
                 }}>
                 Dismiss (fizzle)
               </button>
@@ -2008,10 +2012,11 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
           return (
             <div
               key={caseId}
-              onClick={() => setSelA(caseId)}
+              onClick={canInteract ? () => setSelA(caseId) : undefined}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
-                padding: '7px 10px', borderRadius: 2, marginBottom: 4, cursor: 'pointer',
+                padding: '7px 10px', borderRadius: 2, marginBottom: 4,
+                cursor: canInteract ? 'pointer' : 'default',
                 border: `1px solid ${selA === caseId ? 'var(--terra)' : 'var(--b2)'}`,
                 background: selA === caseId ? 'var(--bg4)' : 'var(--bg3)',
                 transition: 'all 0.12s',
@@ -2022,7 +2027,7 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
                   {caseDef?.name || caseId}
                 </div>
                 {rewardStr && (
-                  <div className="f-mono" style={{ fontSize: 8, color: 'var(--gold)', marginTop: 2 }}>
+                  <div className="f-mono" style={{ fontSize: 9, color: 'var(--gold)', marginTop: 2 }}>
                     {rewardStr}
                   </div>
                 )}
@@ -2100,9 +2105,10 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
         subtitle={`${player?.name} — Gain or Lose 1 water claim?`}>
         <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
           <button
-            onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId,
+            disabled={!canInteract}
+            onClick={() => canInteract && onResolve({ subtype: effect.subtype, playerId: effect.playerId,
               cardId: effect.cardId, direction: 1 })}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--water)22'; }}
+            onMouseEnter={e => { if (canInteract) e.currentTarget.style.background = 'var(--water)22'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
             style={{
               flex: 1, padding: '10px 0',
@@ -2110,14 +2116,17 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
               borderRadius: 2, color: 'var(--water)',
               fontFamily: "'Courier Prime', monospace",
               fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
-              cursor: 'pointer', transition: 'all 0.15s',
+              cursor: canInteract ? 'pointer' : 'not-allowed',
+              opacity: canInteract ? 1 : 0.45,
+              transition: 'all 0.15s',
             }}>
             ▲ Gain 1
           </button>
           <button
-            onClick={() => onResolve({ subtype: effect.subtype, playerId: effect.playerId,
+            disabled={!canInteract}
+            onClick={() => canInteract && onResolve({ subtype: effect.subtype, playerId: effect.playerId,
               cardId: effect.cardId, direction: -1 })}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--terra)22'; }}
+            onMouseEnter={e => { if (canInteract) e.currentTarget.style.background = 'var(--terra)22'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
             style={{
               flex: 1, padding: '10px 0',
@@ -2125,7 +2134,9 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
               borderRadius: 2, color: 'var(--terra)',
               fontFamily: "'Courier Prime', monospace",
               fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase',
-              cursor: 'pointer', transition: 'all 0.15s',
+              cursor: canInteract ? 'pointer' : 'not-allowed',
+              opacity: canInteract ? 1 : 0.45,
+              transition: 'all 0.15s',
             }}>
             ▼ Lose 1
           </button>
@@ -2151,14 +2162,15 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
           {opts.map(opt => (
             <button
               key={opt.idx}
-              onClick={() => onResolve({
+              disabled={!canInteract}
+              onClick={() => canInteract && onResolve({
                 subtype: effect.subtype,
                 playerId: effect.playerId,
                 cardId: effect.cardId,
                 side: effect.side,
                 alternativeIdx: opt.idx,
               })}
-              onMouseEnter={e => { e.currentTarget.style.background = fColor + '18'; }}
+              onMouseEnter={e => { if (canInteract) e.currentTarget.style.background = fColor + '18'; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
               style={{
                 width: '100%', padding: '9px 14px', textAlign: 'left',
@@ -2167,9 +2179,11 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
                 borderRadius: 2,
                 color: opt.idx === 0 ? 'var(--t1)' : 'var(--t2)',
                 fontFamily: "'Courier Prime', monospace",
-                cursor: 'pointer', transition: 'all 0.15s',
+                cursor: canInteract ? 'pointer' : 'not-allowed',
+                opacity: canInteract ? 1 : 0.55,
+                transition: 'all 0.15s',
               }}>
-              <div style={{ fontSize: 8, color: opt.idx === 0 ? fColor : 'var(--t4)',
+              <div style={{ fontSize: 9, color: opt.idx === 0 ? fColor : 'var(--t4)',
                   textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 3 }}>
                 {opt.label}
               </div>
@@ -2192,289 +2206,22 @@ function ChoiceResolutionModal({ effect, state, onResolve, onUndo, canUndo }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WATER ALLOCATION MODAL
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * WaterAllocationModal
- *
- * Legacy modal — kept in case a 'water_allocation' pendingEffect surfaces.
- * Under the new rules, water placement is done per-action in Consume phase
- * via +◈ buttons on each project space.
- *
- * Layout:
- *   - Water supply counter (shared pool, live)
- *   - One section per player; their projects listed as rows
- *   - Each project row shows current fill, +1 / Fill / −1 buttons
- *   - "Done" button dismisses the pendingEffect, enabling Advance
- *
- * Props
- *   state           full gameState
- *   waterSupply     number (from sharedBoard.waterSupply)
- *   onAllocate      fn(playerId, projectType, projectId, count)
- *   onDone          fn() — clears the water_allocation pendingEffect
- */
-function WaterAllocationModal({ state, waterSupply, onAllocate, onDone }) {
-  const allDefs = {
-    citizen: PROJECT_DEFS.citizen,
-    income:  PROJECT_DEFS.income,
-  };
-
-  // Tally unfilled slots across all players to show a "fill all" affordance
-  const totalUnfilled = state.playerOrder.reduce((sum, pid) => {
-    const p = state.players[pid];
-    return sum + Object.entries({ ...p.projects.citizen, ...p.projects.income })
-      .reduce((s, [, proj]) => s + Math.max(0, proj.water_slots - proj.watered), 0);
-  }, 0);
-
-  return (
-    <div style={{
-      position: "absolute", inset: 0, zIndex: 100,
-      background: "rgba(13,11,8,0.82)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: 24,
-    }}>
-      <div style={{
-        background: "var(--bg2)", border: "1px solid var(--water-dim)",
-        borderRadius: 4, width: "100%", maxWidth: 700,
-        maxHeight: "90vh", display: "flex", flexDirection: "column",
-        boxShadow: "0 24px 64px rgba(0,0,0,0.7)",
-      }}>
-
-        {/* Header */}
-        <div style={{
-          padding: "14px 20px", borderBottom: "1px solid var(--b1)",
-          display: "flex", alignItems: "center", gap: 16, flexShrink: 0,
-        }}>
-          <span className="f-display" style={{ fontSize: 13, color: "var(--water)", letterSpacing: "0.08em" }}>
-            Water Allocation
-          </span>
-          <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", textTransform: "uppercase",
-              letterSpacing: "0.12em" }}>
-            Round {state.round}
-          </span>
-
-          {/* Supply counter */}
-          <div style={{
-            marginLeft: "auto", display: "flex", alignItems: "center", gap: 10,
-            padding: "5px 14px", border: "1px solid var(--water-dim)",
-            borderRadius: 2, background: "var(--bg3)",
-          }}>
-            <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", textTransform: "uppercase",
-                letterSpacing: "0.1em" }}>
-              Supply
-            </span>
-            <span className="f-mono" style={{
-              fontSize: 22, color: waterSupply > 0 ? "var(--water-bright)" : "var(--t4)",
-              fontWeight: 700, lineHeight: 1,
-            }}>
-              {waterSupply}
-            </span>
-            <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>💧</span>
-          </div>
-        </div>
-
-        {/* Body — scrollable */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px" }}>
-          {state.playerOrder.map((pid) => {
-            const player = state.players[pid];
-            const fColor = FACTION_COLORS[player.factionId] || "var(--terra)";
-            return (
-              <div key={pid} style={{ marginBottom: 20 }}>
-                {/* Player sub-header */}
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  marginBottom: 8, paddingBottom: 5,
-                  borderBottom: "1px solid var(--b1)",
-                }}>
-                  <div style={{ width: 7, height: 7, borderRadius: 1, background: fColor }} />
-                  <span className="f-body" style={{ fontSize: 12, color: "var(--t1)" }}>{player.name}</span>
-                  <span className="f-mono" style={{ fontSize: 9, color: "var(--water)", marginLeft: 4 }}>
-                    {player.waterCubes} 💧
-                  </span>
-                </div>
-
-                {/* Projects */}
-                {["citizen", "income"].map((ptype) => (
-                  <div key={ptype} style={{ marginBottom: 8 }}>
-                    <div className="f-mono" style={{ fontSize: 8, color: "var(--t4)",
-                        textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 4 }}>
-                      {ptype === "citizen" ? "Citizen Projects" : "Income Projects"}
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      {allDefs[ptype].map((def) => {
-                        const proj     = player.projects[ptype]?.[def.id] || { watered: 0, water_slots: def.slots };
-                        const slots    = proj.water_slots ?? def.slots;
-                        const watered  = proj.watered;
-                        const full     = watered >= slots;
-                        const empty    = watered === 0;
-                        const canAdd1  = !full && waterSupply >= 1;
-                        const canFill  = !full && waterSupply >= (slots - watered);
-                        const canSub1  = watered > 0;
-
-                        const rowBorder = full
-                          ? "var(--water-dim)"
-                          : watered > 0 ? "var(--terra-dim)" : "var(--b0)";
-
-                        return (
-                          <div key={def.id} style={{
-                            display: "flex", alignItems: "center", gap: 8,
-                            padding: "5px 8px",
-                            background: "var(--bg3)",
-                            border: `1px solid ${rowBorder}`,
-                            borderRadius: 2,
-                          }}>
-                            <span style={{ fontSize: 11, flexShrink: 0 }}>{def.icon}</span>
-                            <span className="f-body" style={{ fontSize: 11, color: "var(--t2)", minWidth: 80 }}>
-                              {def.label}
-                            </span>
-
-                            {/* Water slots visual */}
-                            <div style={{ display: "flex", gap: 3, flex: 1 }}>
-                              {Array.from({ length: slots }).map((_, i) => (
-                                <div key={i} className={`wslot ${i < watered ? "on" : ""}`} />
-                              ))}
-                              <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)", marginLeft: 4 }}>
-                                {watered}/{slots}
-                              </span>
-                            </div>
-
-                            {/* Reward label */}
-                            <span className="f-mono" style={{
-                              fontSize: 8,
-                              color: ptype === "citizen" ? "var(--pr-pos)" : "var(--money)",
-                              minWidth: 70, textAlign: "right",
-                            }}>
-                              {def.reward}
-                            </span>
-
-                            {/* Allocation buttons */}
-                            <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-                              <AllocBtn
-                                label="−"
-                                enabled={canSub1}
-                                color="var(--terra)"
-                                title="Remove 1 water cube"
-                                onClick={() => onAllocate(pid, ptype, def.id, -1)}
-                              />
-                              <AllocBtn
-                                label="+1"
-                                enabled={canAdd1}
-                                color="var(--water)"
-                                title="Add 1 water cube"
-                                onClick={() => onAllocate(pid, ptype, def.id, 1)}
-                              />
-                              <AllocBtn
-                                label="Fill"
-                                enabled={canFill}
-                                color="var(--water-bright)"
-                                title={`Fill all ${slots - watered} remaining slots`}
-                                onClick={() => onAllocate(pid, ptype, def.id, slots - watered)}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Footer */}
-        <div style={{
-          padding: "12px 20px", borderTop: "1px solid var(--b1)",
-          display: "flex", alignItems: "center", gap: 12, flexShrink: 0,
-        }}>
-          {waterSupply > 0 && (
-            <span className="f-mono" style={{ fontSize: 9, color: "var(--water-dim)", letterSpacing: "0.08em" }}>
-              {waterSupply} cube{waterSupply !== 1 ? "s" : ""} remain unallocated
-            </span>
-          )}
-          {waterSupply === 0 && (
-            <span className="f-mono" style={{ fontSize: 9, color: "var(--water-bright)", letterSpacing: "0.08em" }}>
-              ✓ All water distributed
-            </span>
-          )}
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            {/* Always allow Done — players may intentionally leave supply unspent */}
-            <button
-              onClick={onDone}
-              onMouseEnter={e => { e.currentTarget.style.background = "var(--water)"; e.currentTarget.style.color = "#fff"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--water)"; }}
-              style={{
-                background: "none",
-                border: "1px solid var(--water)",
-                borderRadius: 2,
-                color: "var(--water)",
-                fontFamily: "'Courier Prime', 'Courier New', monospace",
-                fontSize: 10,
-                letterSpacing: "0.14em",
-                padding: "6px 20px",
-                cursor: "pointer",
-                textTransform: "uppercase",
-                transition: "all 0.15s",
-              }}>
-              Done Allocating
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Small +/− allocation button used inside WaterAllocationModal */
-function AllocBtn({ label, enabled, color, title, onClick }) {
-  return (
-    <button
-      disabled={!enabled}
-      title={title}
-      onClick={onClick}
-      onMouseEnter={e => { if (enabled) e.currentTarget.style.background = color + "22"; }}
-      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-      style={{
-        background: "transparent",
-        border: `1px solid ${enabled ? color : "var(--b1)"}`,
-        borderRadius: 2,
-        color: enabled ? color : "var(--t4)",
-        fontFamily: "'Courier Prime', 'Courier New', monospace",
-        fontSize: 9,
-        padding: "2px 7px",
-        cursor: enabled ? "pointer" : "not-allowed",
-        opacity: enabled ? 1 : 0.4,
-        transition: "all 0.12s",
-        whiteSpace: "nowrap",
-      }}>
-      {label}
-    </button>
-  );
-}
-
 /**
  * PhaseControls
  *
- * Negotiate / Consume phases:
- *   Active player sees "End Turn" (took action) and "Pass" (consecutive-pass).
- *   Other players see a dimmed "Waiting…" indicator.
+ * Negotiate / Consume phases (turns auto-advance after every TURN action —
+ * there is no "End Turn" button):
+ *   The client controlling the active seat sees a "Pass" button plus a hint
+ *   that taking an action ends the turn. Everyone else sees a waiting note.
+ *   Pass is disabled while a blocking choice_required pendingEffect is open.
  *
- * Round Setup / End Step auto-resolve, so no Advance button is needed.
- * Consume phase: Advance is blocked while a protest_activation_round
- *   or choice_required pendingEffect is unresolved.
+ * Round Setup / End Step auto-resolve; the Advance button (host/local only)
+ * moves the game on. Guests see a "waiting for host" note instead.
  */
-function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, endPlayerTurn, passPlayerTurn, advanceToNextPhase }) {
+function PhaseControls({ phase, activePlayer, pendingEffects, isGuest = false,
+    canControlActive = true, passPlayerTurn, advanceToNextPhase }) {
   const inActionPhase = isActionPhase(phase);
-  const isYourTurn    = activePlayer?.id === viewingPlayer?.id;
-
-  // Block Advance if there are effects that require player decisions first
-  const BLOCKING_EFFECT_TYPES = new Set([
-    'protest_activation_round',
-    'choice_required',
-  ]);
-  const hasBlockingEffect = pendingEffects.some(e => BLOCKING_EFFECT_TYPES.has(e.type));
+  const hasBlockingEffect = pendingEffects.some(e => e.type === 'choice_required');
 
   // ── Shared style builders ────────────────────────────────────────────────
   const btn = (color, disabled = false) => ({
@@ -2493,9 +2240,9 @@ function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, end
     opacity: disabled ? 0.5 : 1,
   });
 
-  // ── Action phase: End Turn ───────────────────────────────────────────────
+  // ── Action phase: Pass only (actions end the turn automatically) ─────────
   if (inActionPhase) {
-    if (!isYourTurn) {
+    if (!canControlActive) {
       return (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ width: 6, height: 6, borderRadius: 1, background: "var(--t4)",
@@ -2510,32 +2257,41 @@ function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, end
 
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", letterSpacing: "0.08em" }}>
-          Your turn
+        <span className="f-mono" style={{ fontSize: 9, color: "var(--t3)", letterSpacing: "0.06em" }}>
+          taking an action ends your turn
         </span>
         <button
-          style={btn("var(--terra)")}
-          onClick={endPlayerTurn}
-          onMouseEnter={e => { e.currentTarget.style.background="var(--terra)"; e.currentTarget.style.color="#fff"; }}
-          onMouseLeave={e => { e.currentTarget.style.background="none"; e.currentTarget.style.color="var(--terra)"; }}>
-          End Turn →
-        </button>
-        <button
-          style={btn("var(--t3)")}
-          onClick={passPlayerTurn}
-          onMouseEnter={e => { e.currentTarget.style.background="var(--b2)"; }}
-          onMouseLeave={e => { e.currentTarget.style.background="none"; }}
-          title="Pass your turn (no action taken)">
+          disabled={hasBlockingEffect}
+          style={btn("var(--t3)", hasBlockingEffect)}
+          onClick={hasBlockingEffect ? undefined : passPlayerTurn}
+          onMouseEnter={e => { if (!hasBlockingEffect) e.currentTarget.style.background = "var(--b2)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+          title={hasBlockingEffect
+            ? "Resolve the pending choice before passing"
+            : "Pass your turn (no action taken)"}>
           Pass
         </button>
       </div>
     );
   }
 
-  // ── Non-action phases: Advance ───────────────────────────────────────────
+  // ── Non-action phases: Advance (host/local) or waiting note (guest) ──────
+  if (isGuest) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 6, height: 6, borderRadius: 1, background: "var(--t4)",
+            animation: "pulsedot 1.6s ease-in-out infinite" }} />
+        <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)",
+            letterSpacing: "0.1em", textTransform: "uppercase" }}>
+          waiting for host
+        </span>
+      </div>
+    );
+  }
+
   const advanceBlocked = hasBlockingEffect;
   const blockReason = advanceBlocked
-    ? (pendingEffects.find(e => e.type === 'protest_activation_round')
+    ? (pendingEffects.find(e => e.subtype === 'protest_activation_round')
         ? "Resolve protest before advancing"
         : "Resolve pending effects before advancing")
     : null;
@@ -2567,7 +2323,9 @@ function PhaseControls({ phase, activePlayer, viewingPlayer, pendingEffects, end
 function GameOverOverlay({ finalScores, onPlayAgain }) {
   if (!finalScores) return null;
 
-  const sorted = [...finalScores].sort((a, b) => b.totalVP - a.totalVP);
+  // finalScores comes pre-ranked from calculateFinalScores (field: rank,
+  // ties share a rank). Entries carry `total`, not `totalVP`.
+  const sorted = [...finalScores].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99) || b.total - a.total);
 
   return (
     <div style={{
@@ -2589,25 +2347,26 @@ function GameOverOverlay({ finalScores, onPlayAgain }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 28 }}>
-          {sorted.map((entry, i) => {
+          {sorted.map((entry) => {
             const fColor = FACTION_COLORS[entry.factionId] || "var(--t2)";
+            const isWinner = entry.rank === 1;
             return (
               <div key={entry.playerId} style={{
                 display: "flex", alignItems: "center", gap: 10,
                 padding: "8px 12px",
-                background: i === 0 ? "var(--bg4)" : "var(--bg3)",
-                border: `1px solid ${i === 0 ? fColor + "66" : "var(--b0)"}`,
+                background: isWinner ? "var(--bg4)" : "var(--bg3)",
+                border: `1px solid ${isWinner ? fColor + "66" : "var(--b0)"}`,
                 borderRadius: 2,
               }}>
-                <span className="f-mono" style={{ fontSize: 11, color: "var(--t4)", minWidth: 16 }}>
-                  {i === 0 ? "★" : `${i + 1}.`}
+                <span className="f-mono" style={{ fontSize: 11, color: isWinner ? "var(--gold)" : "var(--t4)", minWidth: 20 }}>
+                  {isWinner ? "🥇" : `${entry.rank}.`}
                 </span>
                 <div style={{ width: 7, height: 7, borderRadius: 1, background: fColor, flexShrink: 0 }} />
-                <span className="f-body" style={{ flex: 1, fontSize: 13, color: i === 0 ? "var(--t1)" : "var(--t2)" }}>
+                <span className="f-body" style={{ flex: 1, fontSize: 13, color: isWinner ? "var(--t1)" : "var(--t2)" }}>
                   {entry.name}
                 </span>
                 <span className="f-mono" style={{ fontSize: 16, color: "var(--vp)", fontWeight: 700 }}>
-                  {entry.totalVP}
+                  {entry.total}
                 </span>
                 <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>VP</span>
               </div>
@@ -2639,39 +2398,72 @@ function GameOverOverlay({ finalScores, onPlayAgain }) {
 // ───────────────────────────────────────────────────────────────────────────────
 
 export default function GameTable() {
-  // ── Live store values ──────────────────────────────────────────────
-  const storeState         = useGameStore(s => s.gameState);
-  const storePending       = useGameStore(s => s.pendingEffects);
+  // Populate the module-level card definition index from live state BEFORE any
+  // child renders (memoized reassignment — no per-component mutation, and the
+  // whole tree below is gated on storeState existing).
+  const storeState = useGameStore(s => s.gameState);
+  useMemo(() => { CARD_INDEX = storeState?.cardIndex ?? {}; }, [storeState?.cardIndex]);
+
+  if (!storeState) return null;
+  return <GameTableInner />;
+}
+
+function GameTableInner() {
+  // ── Live game store values ─────────────────────────────────────────
+  const state              = useGameStore(s => s.gameState);
+  const pendingEffects     = useGameStore(s => s.pendingEffects) ?? [];
   const isGameOver         = useGameStore(s => s.isGameOver);
   const finalScores        = useGameStore(s => s.finalScores);
-  const endPlayerTurn      = useGameStore(s => s.endPlayerTurn);
+  const protestActivations = useGameStore(s => s.protestActivations) ?? {};
   const advanceToNextPhase = useGameStore(s => s.advanceToNextPhase);
-  const playCardAction             = useGameStore(s => s.playCardAction);
-  const allocateWater              = useGameStore(s => s.allocateWater);
-  const dismissWaterAllocation     = useGameStore(s => s.dismissWaterAllocation);
-  const deallocateWater            = useGameStore(s => s.deallocateWater);
-  const purchasePartnership        = useGameStore(s => s.purchasePartnership);
-  const usePartnershipAbility      = useGameStore(s => s.usePartnershipAbility);
-  const unlockWaterBank            = useGameStore(s => s.unlockWaterBank);
-  const depositToWaterBank         = useGameStore(s => s.depositToWaterBank);
-  const withdrawFromWaterBank      = useGameStore(s => s.withdrawFromWaterBank);
-  const placeScInfluence           = useGameStore(s => s.placeScInfluence);
-  const resolveChoice              = useGameStore(s => s.resolveChoice);
-  const acquireLawyer              = useGameStore(s => s.acquireLawyer);
-  const acquireActivist            = useGameStore(s => s.acquireActivist);
-  const undo                       = useGameStore(s => s.undo);
-  const redo                       = useGameStore(s => s.redo);
-  const dismissChoiceEffect        = useGameStore(s => s.dismissChoiceEffect);
-  const passPlayerTurn             = useGameStore(s => s.passPlayerTurn);
-  const placeWaterOnProjectStore   = useGameStore(s => s.placeWaterOnProject);
-  // Fall back to mock when running standalone (no initGame called yet)
-  const state          = storeState ?? MOCK_STATE;
-  const pendingEffects = storeState ? (storePending ?? []) : (MOCK_STATE.pendingEffects ?? []);
-  const canUndo = (storeState?.undoStack?.length ?? 0) > 0;
-  const canRedo = (storeState?.redoStack?.length ?? 0) > 0;
+  const playCardAction           = useGameStore(s => s.playCardAction);
+  const purchasePartnership      = useGameStore(s => s.purchasePartnership);
+  const usePartnershipAbility    = useGameStore(s => s.usePartnershipAbility);
+  const cancelPartnershipAcquire = useGameStore(s => s.cancelPartnershipAcquire);
+  const unlockWaterBank          = useGameStore(s => s.unlockWaterBank);
+  const depositToWaterBank       = useGameStore(s => s.depositToWaterBank);
+  const withdrawFromWaterBank    = useGameStore(s => s.withdrawFromWaterBank);
+  const placeScInfluence         = useGameStore(s => s.placeScInfluence);
+  const resolveChoice            = useGameStore(s => s.resolveChoice);
+  const acquireLawyer            = useGameStore(s => s.acquireLawyer);
+  const acquireActivist          = useGameStore(s => s.acquireActivist);
+  const activateProtestActivist  = useGameStore(s => s.activateProtestActivist);
+  const undo                     = useGameStore(s => s.undo);
+  const redo                     = useGameStore(s => s.redo);
+  const dismissChoiceEffect      = useGameStore(s => s.dismissChoiceEffect);
+  const passPlayerTurn           = useGameStore(s => s.passPlayerTurn);
+  const placeWaterOnProjectStore = useGameStore(s => s.placeWaterOnProject);
 
-  // Merge real card definitions into the display lookup (real data wins over mock stubs)
-  if (state.cardIndex) Object.assign(CARD_INDEX, state.cardIndex);
+  // ── Multiplayer (net store) ────────────────────────────────────────
+  const mode           = useNetStore(s => s.mode);
+  const mySeats        = useNetStore(s => s.mySeats);
+  const seatMap        = useNetStore(s => s.seatMap);
+  const roomCode       = useNetStore(s => s.roomCode);
+  const peerError      = useNetStore(s => s.peerError);
+  const guestConnected = useNetStore(s => !!s.hostConn?.open);
+  const isGuest        = mode === 'guest';
+  const canControl     = (pid) => controlsSeat(mode, mySeats, pid);
+
+  // Host-only controls: undo/redo (guests get no-op stubs anyway — hide them)
+  const canUndo = !isGuest && (state.undoStack?.length ?? 0) > 0;
+  const canRedo = !isGuest && (state.redoStack?.length ?? 0) > 0;
+
+  // ── Zoom (persisted) ───────────────────────────────────────────────
+  const [zoom, setZoom] = useState(() => {
+    let stored = NaN;
+    try { stored = parseInt(localStorage.getItem(ZOOM_STORAGE_KEY) ?? '', 10); } catch { /* ignore */ }
+    return ZOOM_STEPS.includes(stored) ? stored : 100;
+  });
+  useEffect(() => {
+    try { localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom)); } catch { /* ignore */ }
+  }, [zoom]);
+  const zoomIdx       = ZOOM_STEPS.indexOf(zoom);
+  const handleZoomIn  = () => setZoom(ZOOM_STEPS[Math.min(zoomIdx + 1, ZOOM_STEPS.length - 1)]);
+  const handleZoomOut = () => setZoom(ZOOM_STEPS[Math.max(zoomIdx - 1, 0)]);
+
+  // ── Dismissable connection-error banner ────────────────────────────
+  const [dismissedError, setDismissedError] = useState(null);
+  const showPeerError = !!peerError && peerError !== dismissedError;
 
   // ── Local UI state ────────────────────────────────────────────────
   const [viewedPlayerId, setViewedPlayerId] = useState(state.playerOrder[0]);
@@ -2685,114 +2477,153 @@ export default function GameTable() {
   const activePlayer = state.players[activeId];
   const viewedPlayer = state.players[safeViewedId];
 
+  // May this client act with the currently ACTIVE player's pieces?
+  const canControlActive = canControl(activeId);
+  // Viewed board is interactive only when it is the active player's board
+  // AND this client controls that seat (always true in local mode).
+  const canActViewed = safeViewedId === activeId && canControlActive;
+
   // ── Handlers ─────────────────────────────────────────────────────
-  // In mock/dev mode, these are no-ops so buttons render without crashing
-  const handleEndTurn      = storeState ? endPlayerTurn      : () => {};
-  const handlePassTurn     = storeState ? passPlayerTurn     : () => {};
-  const handleAdvancePhase = storeState ? advanceToNextPhase : () => {};
-  const handlePlaceWater   = (projectType, projectId) => {
-    if (storeState && activePlayer) placeWaterOnProjectStore(activePlayer.id, projectType, projectId);
+  const handlePlaceWater = (projectType, projectId) => {
+    if (activePlayer) placeWaterOnProjectStore(activePlayer.id, projectType, projectId);
   };
-  const handlePlayAgain    = () => window.location.reload();
+  const handlePlayAgain = () => window.location.reload();
 
-  // Card action handler — routes through the store's playCardAction.
-  // playerId is always the active player (engine enforces turn order).
-  const handlePlayCard = (cardId, side) => {
-    if (storeState && activePlayer) playCardAction(activePlayer.id, cardId, side);
+  // Tableau card plays carry the exact instanceId (duplicate citizen copies
+  // exist); strategy plays are side-aware and come from the hand.
+  const handlePlayCard = (cardId, side, instanceId) => {
+    if (activePlayer) playCardAction(activePlayer.id, cardId, side, { instanceId });
   };
-  const handlePlayStrategy = (cardId) => handlePlayCard(cardId, 'N');
-
-  // Water allocation handlers
-  const waterAllocationEffect = pendingEffects.find(e => e.type === 'water_allocation');
-  const handleAllocateWater = (playerId, projectType, projectId, count) => {
-    if (!storeState) return;
-    if (count > 0) {
-      allocateWater(playerId, projectType, projectId, count);
-    } else if (count < 0) {
-      // Remove cubes: handled via a direct dispatch in the store
-      deallocateWater(playerId, projectType, projectId, Math.abs(count));
-    }
-  };
-  const handleDoneAllocating = () => {
-    if (storeState) dismissWaterAllocation();
+  const handlePlayStrategy = (cardId, side) => {
+    if (activePlayer) playCardAction(activePlayer.id, cardId, side);
   };
 
   // Partnership handlers
   const handleBuyPartnership = (partnershipId) => {
-    if (storeState && activePlayer) purchasePartnership(activePlayer.id, partnershipId);
+    if (activePlayer) purchasePartnership(activePlayer.id, partnershipId);
   };
   const handleUsePartnership = (partnershipId) => {
-    if (storeState && activePlayer) usePartnershipAbility(activePlayer.id, partnershipId);
+    if (activePlayer) usePartnershipAbility(activePlayer.id, partnershipId);
+  };
+  const handleCancelPartnership = (playerId) => cancelPartnershipAcquire(playerId);
+
+  // Open partnership-acquire flows for the ACTIVE player — while open, the
+  // market shows the flat ability fee as that player's price.
+  const partnershipFlows = {
+    lawyer: pendingEffects.find(e => e.type === 'pending_partnership_acquire'
+      && e.playerId === activeId && e.marketType === 'lawyer') ?? null,
+    activist: pendingEffects.find(e => e.type === 'pending_partnership_acquire'
+      && e.playerId === activeId && e.marketType === 'activist') ?? null,
   };
 
   // Water bank handlers
   const handleUnlockBank = () => {
-    if (storeState && activePlayer) unlockWaterBank(activePlayer.id);
+    if (activePlayer) unlockWaterBank(activePlayer.id);
   };
   const handleDeposit = (ownerId, count) => {
-    if (storeState && activePlayer) depositToWaterBank(activePlayer.id, ownerId, count);
+    if (activePlayer) depositToWaterBank(activePlayer.id, ownerId, count);
   };
   const handleWithdraw = (count) => {
-    if (storeState && activePlayer) withdrawFromWaterBank(activePlayer.id, count);
+    if (activePlayer) withdrawFromWaterBank(activePlayer.id, count);
   };
 
   // SC influence handler
   const activeCaseId = state.sharedBoard?.docket?.[0] ?? null;
   const handlePlaceScInfluence = (caseId, amount) => {
-    if (storeState && activePlayer) placeScInfluence(activePlayer.id, caseId, amount);
+    if (activePlayer) placeScInfluence(activePlayer.id, caseId, amount);
   };
 
   // Choice resolution
   const activeChoiceEffect = pendingEffects.find(e => e.type === 'choice_required');
-  const handleResolveChoice = (choiceData) => {
-    if (storeState) resolveChoice(choiceData);
-  };
+  const handleResolveChoice = (choiceData) => resolveChoice(choiceData);
 
   // Market acquisition handlers
   const handleAcquireLawyer = (marketIndex) => {
-    if (storeState && activePlayer) acquireLawyer(activePlayer.id, marketIndex);
+    if (activePlayer) acquireLawyer(activePlayer.id, marketIndex);
   };
   const handleAcquireActivist = (marketIndex) => {
-    if (storeState && activePlayer) acquireActivist(activePlayer.id, marketIndex);
+    if (activePlayer) acquireActivist(activePlayer.id, marketIndex);
   };
-
-  // Global undo/redo handlers
-  const handleUndo = () => { if (storeState) undo(); };
-  const handleRedo = () => { if (storeState) redo(); };
 
   // Undo a card play from inside a choice modal (undo game state + clear the
   // pending effect, which lives outside gameState on the store top-level)
   const handleUndoChoiceCard = () => {
-    if (!storeState) return;
     undo();
     if (activeChoiceEffect) dismissChoiceEffect(activeChoiceEffect.subtype);
   };
 
   return (
-    <div className="grain" style={{ width: "100vw", height: "100vh", display: "flex",
-        flexDirection: "column", background: "var(--bg0)", overflow: "hidden", position: "relative" }}>
+    <div className="grain" style={{
+        width: "100%", minWidth: 1080, height: "100%",
+        display: "flex", flexDirection: "column",
+        background: "var(--bg0)", position: "relative",
+        zoom: zoom / 100,
+      }}>
       <GlobalStyles />
+
+      {/* ── Connection error banner ── */}
+      {showPeerError && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "5px 16px", flexShrink: 0,
+          background: "rgba(196,96,96,0.14)", borderBottom: "1px solid var(--pr-neg)",
+        }}>
+          <span className="f-mono" style={{ fontSize: 10, color: "var(--pr-neg)", flex: 1 }}>
+            ⚠ {peerError}
+          </span>
+          <button
+            onClick={() => setDismissedError(peerError)}
+            title="Dismiss"
+            style={{
+              background: "transparent", border: "none", color: "var(--pr-neg)",
+              fontFamily: "'Courier Prime', monospace", fontSize: 11,
+              cursor: "pointer", padding: "0 4px",
+            }}>
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ── Game Over overlay ── */}
       {isGameOver && (
         <GameOverOverlay finalScores={finalScores} onPlayAgain={handlePlayAgain} />
       )}
 
+      {/* ── Choice Resolution Modal (full-screen blocking overlay) ── */}
+      {activeChoiceEffect && (
+        <ChoiceResolutionModal
+          effect={activeChoiceEffect}
+          state={state}
+          onResolve={handleResolveChoice}
+          onUndo={handleUndoChoiceCard}
+          canUndo={canUndo}
+          canInteract={canControl(activeChoiceEffect.playerId)}
+          canResolveProtest={!isGuest}
+          canControlSeat={canControl}
+          protestActivations={protestActivations}
+          onActivateProtestActivist={activateProtestActivist}
+        />
+      )}
+
       {/* ── Phase Bar ── */}
-      <PhaseBar state={state} activePlayer={activePlayer} canUndo={canUndo} canRedo={canRedo} onUndo={handleUndo} onRedo={handleRedo}>
+      <PhaseBar
+        state={state} activePlayer={activePlayer}
+        canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
+        mode={mode} roomCode={roomCode} guestConnected={guestConnected}
+        zoom={zoom} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut}>
         <PhaseControls
           phase={state.phase}
           activePlayer={activePlayer}
-          viewingPlayer={viewedPlayer}
           pendingEffects={pendingEffects}
-          endPlayerTurn={handleEndTurn}
-          passPlayerTurn={handlePassTurn}
-          advanceToNextPhase={handleAdvancePhase}
+          isGuest={isGuest}
+          canControlActive={canControlActive}
+          passPlayerTurn={passPlayerTurn}
+          advanceToNextPhase={advanceToNextPhase}
         />
       </PhaseBar>
 
       {/* ── Main 3-column layout ── */}
-      <div style={{ flex: 1, display: "grid", gridTemplateColumns: "220px 1fr 230px",
+      <div style={{ flex: 1, display: "grid", gridTemplateColumns: "220px minmax(0,1fr) 230px",
           overflow: "hidden", minHeight: 0 }}>
 
         {/* LEFT — Shared board */}
@@ -2801,9 +2632,10 @@ export default function GameTable() {
             sharedBoard={state.sharedBoard}
             playerOrder={state.playerOrder}
             players={state.players}
-            isActivePlayer={safeViewedId === activeId}
+            isActivePlayer={canActViewed}
             phase={state.phase}
             activePlayer={activePlayer}
+            partnershipFlows={partnershipFlows}
             onAcquireLawyer={handleAcquireLawyer}
             onAcquireActivist={handleAcquireActivist}
           />
@@ -2812,34 +2644,14 @@ export default function GameTable() {
         {/* CENTER — Player board */}
         <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
 
-          {/* ── Choice Resolution Modal ── */}
-          {activeChoiceEffect && storeState && (
-            <ChoiceResolutionModal
-              effect={activeChoiceEffect}
-              state={state}
-              onResolve={handleResolveChoice}
-              onUndo={handleUndoChoiceCard}
-              canUndo={canUndo}
-            />
-          )}
-
-          {/* ── Water Allocation Modal ── */}
-          {waterAllocationEffect && storeState && (
-            <WaterAllocationModal
-              state={state}
-              waterSupply={state.sharedBoard.waterSupply}
-              onAllocate={handleAllocateWater}
-              onDone={handleDoneAllocating}
-            />
-          )}
-
           {/* Player switcher tabs */}
           <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--b0)",
               padding: "0 16px", background: "var(--bg1)", flexShrink: 0 }}>
             {state.playerOrder.map((pid) => {
               const p = state.players[pid];
-              const isActivePid = pid === activeId;
-              const isViewed    = pid === safeViewedId;
+              const isActivePid  = pid === activeId;
+              const isViewed     = pid === safeViewedId;
+              const disconnected = seatMap?.[pid]?.connected === false;
               return (
                 <button key={pid}
                   className={`player-tab f-display ${isViewed ? "active" : ""}`}
@@ -2856,6 +2668,10 @@ export default function GameTable() {
                   )}
                   {p.name}
                   <span className="f-mono" style={{ fontSize: 9, color: "var(--vp)" }}>{p.vp}vp</span>
+                  {disconnected && (
+                    <span className="f-mono" title="Player disconnected"
+                      style={{ fontSize: 9, color: "var(--pr-neg)" }}>(disconnected)</span>
+                  )}
                 </button>
               );
             })}
@@ -2865,7 +2681,7 @@ export default function GameTable() {
           <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px" }}>
             <PlayerBoard
               player={viewedPlayer}
-              isActivePlayer={safeViewedId === activeId}
+              isActivePlayer={canActViewed}
               phase={state.phase}
               activeCaseId={activeCaseId}
               allPlayers={state.players}
@@ -2885,19 +2701,23 @@ export default function GameTable() {
 
         {/* RIGHT — Action log */}
         <div style={{ borderLeft: "1px solid var(--b0)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <ActionLog log={state.actionLog} pendingEffects={pendingEffects} />
+          <ActionLog
+            log={state.actionLog}
+            pendingEffects={pendingEffects}
+            onCancelPartnership={handleCancelPartnership}
+            canControl={canControl}
+          />
         </div>
       </div>
 
       {/* ── Strategy Hand (bottom strip) ── */}
       <StrategyHand
         hand={viewedPlayer.hand}
-        isActivePlayer={safeViewedId === activeId}
+        isActivePlayer={canActViewed}
+        showFaces={canControl(safeViewedId)}
         phase={state.phase}
+        waterCubes={viewedPlayer.waterCubes ?? 0}
         onPlayStrategy={handlePlayStrategy}
-        onPlayStrategyC={(cardId) => {
-          if (storeState && activePlayer) playCardAction(activePlayer.id, cardId, "C");
-        }}
       />
     </div>
   );

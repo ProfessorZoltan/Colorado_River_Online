@@ -271,14 +271,25 @@ export function canAcquireWithPr(cardDef, currentPr) {
 }
 
 /**
+ * Does the player's PR waive the $4 lawyer surcharge?
+ * RULES §5: waived when PR is at or beyond −7 or +8.
+ * @param {number} currentPr
+ * @returns {boolean}
+ */
+export function prWaivesSurcharge(currentPr) {
+  const [neg, pos] = [Math.min(...PR_THRESHOLDS.FREE_LAWYER_ACQUISITION),
+                      Math.max(...PR_THRESHOLDS.FREE_LAWYER_ACQUISITION)];
+  return currentPr <= neg || currentPr >= pos;
+}
+
+/**
  * Compute the effective acquisition cost for a lawyer card.
- * Discount applies if player is at PR -7 or +8.
+ * The $4 surcharge is waived when PR is at or beyond −7 / +8 (RULES §5).
  * @param {Object} cardDef
  * @param {number} currentPr
  * @returns {number}  Total money cost
  */
 export function lawyerAcquisitionCost(cardDef, currentPr) {
   const SURCHARGE = 4;
-  const atThreshold = PR_THRESHOLDS.FREE_LAWYER_ACQUISITION.includes(currentPr);
-  return cardDef.cost + (atThreshold ? 0 : SURCHARGE);
+  return cardDef.cost + (prWaivesSurcharge(currentPr) ? 0 : SURCHARGE);
 }

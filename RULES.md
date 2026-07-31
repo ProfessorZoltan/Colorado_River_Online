@@ -52,12 +52,18 @@
 
 ### Phase 2 — NEGOTIATE (consecutive-pass phase)
 - Active player starts at the 1st-player marker holder.
-- On your turn, do **one** of:
+- On your turn, do **one** of (TURN actions — the turn auto-advances after):
   - Use a **Lawyer or Activist** — N-side ability only.
   - Play a **Strategy card** — N-side ability only.
   - Buy a **Partnership** (pay cost, mark it owned permanently).
+  - Acquire a **Lawyer** from the market (standard: printed cost + $4 surcharge).
   - **Pass.**
-- Taking any real action resets `consecutivePasses` to 0.
+- FREE actions (do not consume the turn, usable any time during an action
+  phase): partnership abilities (incl. Law Firm / Business acquisitions),
+  Water Bank operations, placing SC influence with water cubes.
+- Taking any TURN action resets `consecutivePasses` to 0 and the engine
+  advances to the next player automatically (deferred while a choice modal
+  is open). There is no separate "End Turn" step.
 - Passing increments `consecutivePasses`.
 - **Phase ends when `consecutivePasses >= playerCount`** (all players passed consecutively).
 - Turn order wraps around (`activePlayerIndex = (current + 1) % playerCount`).
@@ -77,7 +83,8 @@
 1. **Project rewards** (starting with 1st-player marker holder, going clockwise): for each fully-watered project, grant reward.
 2. **Water Rights penalty** (round 3+ only): any player who has **≥1 Water Claims remaining** OR **≥1 water on any incomplete project** loses 1 on their Water Rights track.
 3. **Remove all leftover Water Claims** from all players (set to 0).
-4. **Reset exhausted cards** to READY. LOCKED cards age 1 round then unlock.
+4. **Reset exhausted cards** to READY. LOCKED cards (Red Herring / negate —
+   "cannot be used this round") unlock at this End Step too.
 5. **Discard-condition check**: discard any tableau cards whose PR requirement is no longer met.
 6. **Advance round counter** (after round 10, trigger end-game scoring).
 
@@ -128,14 +135,17 @@
 | Lawyer | Lawyer Market (4 slots) | Negotiate phase | Consume phase | Never (unless effect) |
 | Activist | Activist Market (4 slots, requires Business partnership) | Negotiate phase | Consume phase | Never (unless effect) |
 | Citizen | Completing Citizen Projects | Negotiate phase | Consume phase | PR requirement fails at End Step |
-| Strategy | 3 dealt at start; drawn via card effects | Negotiate phase | Consume phase | After use (single-use) |
+| Strategy | Dealt at start (2p: 3 each, 3–4p: 2 each, 5–6p: 1 each — 8-card deck); drawn via card effects | Negotiate phase | Consume phase | After use (single-use; hand → discard pile) |
 | Event | — (resolved from deck) | — | Resolved automatically | After resolution |
 
 ### Card Exhaustion
 - `cost: "exhaust"` on an action = card must be in READY state to use; becomes EXHAUSTED after.
+- Exhaustion targets a specific card **instance** — owning two copies of a
+  citizen card exhausts them independently.
 - Rider of Coat-tails has `cost: null` — does NOT exhaust when used.
 - EXHAUSTED cards reset to READY at End Step cleanup.
-- LOCKED cards (Red Herring target) stay LOCKED for 1 round, then unlock at next End Step.
+- LOCKED cards (Red Herring / negate target) cannot be used for the rest of
+  the round; they unlock at that round's End Step.
 
 ### Acquiring Lawyers
 - Pay printed cost + **$4 surcharge** (standard).
@@ -199,7 +209,7 @@ Citizen cards are gained as rewards for completing Citizen Projects (Farm, Housi
 | quid_pro_quo | Pay $4 → gain 2💧 | — |
 | lobby_federal_government | Pay $3 → gain 1◈ | — |
 | scorched_earth_negotiating | Pay $2 + 1★ → all opponents lose 1💧 | — |
-| water_bribe | — | Give 1💧 to an opponent → they must give you $3 |
+| water_bribe | — | Give 1💧 to an opponent → they must give you $3 (or all their money if they have less than $3; requires you to have a cube) |
 | red_herring_case | Choose 2 lawyers (any tableau) → they cannot be used this round | — |
 | donate_to_sc_justice | Swap any two upcoming SC cases in the docket | — |
 | protect_our_interests | Negate the effect of any 1 card played or 1 lawyer used | — |
@@ -213,10 +223,14 @@ Deck: 8 cards total. Reshuffle discard into new deck when draw pile is exhausted
 Deck composition: 4× Supreme Court Session, 2× Severe Drought, 1× Protest A, 1× Protest B, 1× Large Snow Melt = **9 cards total**.
 
 ### Protest A (×1)
-- All players may use one Activist C ability to generate Protest Influence (optional).
+- All players may use **one** Activist C ability that generates Protest
+  Influence (optional; enforced one-per-player via `protestActivations`).
+  Activation happens out of turn inside the protest modal
+  (`activateProtestActivist`).
 - Player(s) with **lowest** Protest Influence lose **−3 PR**.
 - Ties: all tied players receive the penalty.
-- Resolves via `protest_activation_round` pendingEffect in UI.
+- Resolves via `choice_required / protest_activation_round` pendingEffect;
+  the host (or local table) clicks Resolve after activations.
 
 ### Protest B (×1)
 - Same as Protest A but penalty is **−1 PR and −1 Water Rights**.
@@ -262,9 +276,12 @@ Owned permanently once bought. Can be used at any point during an action phase.
 
 | ID | Buy cost | Ability (pay each use) |
 |---|---|---|
-| law_firm | $4 | Pay $4 → acquire 1 Lawyer from market (bypasses standard action) |
-| business | $3 | Pay $3 → acquire 1 Activist from market (required to acquire Activists at all) |
-| investment | $2 | Pay $2 → +1 PR immediately |
+| law_firm | $4 | Acquire 1 Lawyer from market for a flat $4 (no printed cost, no surcharge). FREE action; the fee is charged when the lawyer is taken, and the flow can be cancelled at no cost. |
+| business | $3 | Acquire 1 Activist from market for $3 (required to acquire Activists at all). Same free-action flow. |
+| investment | $2 | Pay $2 → +1 PR immediately (free action) |
+
+Team Player's "next lawyer costs $3 less" discount applies to either
+acquisition path.
 
 ---
 
@@ -340,10 +357,12 @@ src/
 ```
 
 ### PendingEffect subtypes requiring UI modals
+All blocking effects are `type: 'choice_required'`; Advance / Pass / new
+actions are blocked while any exists.
+
 | subtype | UI action |
 |---|---|
-| `water_allocation` | Legacy modal (no longer auto-triggered) |
-| `protest_activation_round` | Protest resolution modal |
+| `choice_required / protest_activation_round` | Protest modal (activist activation + resolve) |
 | `choice_required / activist_a_water_direction` | Gain or Lose 1 Water Rights |
 | `choice_required / card_alternative_choice` | Choose primary or alternative effect |
 | `choice_required / red_herring_choose_lawyers` | Pick 2 lawyers to lock |
@@ -386,20 +405,22 @@ src/
 | Action | Description |
 |---|---|
 | `initGame(playerConfigs, cards, playerBoard, sharedBoard)` | Boot; auto-advances to ROUND_SETUP → NEGOTIATE |
-| `advanceToNextPhase()` | Advance phase; ROUND_SETUP auto-chains to NEGOTIATE |
-| `endPlayerTurn()` | Took an action; resets consecutivePasses, advances to next player |
+| `advanceToNextPhase()` | Advance phase; ROUND_SETUP auto-chains to NEGOTIATE; blocked while choices pend |
 | `passPlayerTurn()` | Pass; increments consecutivePasses; ends phase if all passed |
-| `playCardAction(playerId, cardId, side, options)` | Play N or C side; resets consecutivePasses |
-| `placeWaterOnProject(playerId, projectType, projectId)` | Spend 1 Water Claims + 1 river water → +1 on project |
-| `resolveChoice(choiceData)` | Resolve a pendingEffect that required player input |
-| `undo()` / `redo()` | 20-state snapshot stack |
-| `acquireLawyer(playerId, marketIndex)` | Buy from lawyer market |
-| `acquireActivist(playerId, marketIndex)` | Buy from activist market (requires Business) |
-| `purchasePartnership(playerId, partnershipId)` | Buy a partnership |
-| `usePartnershipAbility(playerId, partnershipId)` | Use a partnership ability |
-| `placeScInfluence(playerId, caseId, amount)` | Place SC influence (spends water cubes) |
-| `depositToWaterBank(ownerId, depositorId, cubeCount)` | Store cubes in water bank |
-| `withdrawFromWaterBank(ownerId, cubeCount)` | Retrieve own stored cubes |
+| `playCardAction(playerId, cardId, side, {instanceId})` | TURN action. Validates phase/side/turn/ownership; strategy cards leave the hand → discard; auto-advances the turn |
+| `placeWaterOnProject(playerId, projectType, projectId)` | TURN action. Spend 1 Water Claims + 1 river water → +1 on project |
+| `acquireLawyer(playerId, marketIndex)` | TURN action (or FREE when completing a Law Firm flow — flat fee charged here) |
+| `acquireActivist(playerId, marketIndex)` | TURN action (or FREE via Business flow) |
+| `purchasePartnership(playerId, partnershipId)` | TURN action. Buy a partnership |
+| `usePartnershipAbility(playerId, partnershipId)` | FREE action. Investment resolves immediately; Law Firm/Business open an acquire flow |
+| `cancelPartnershipAcquire(playerId)` | Cancel an open acquire flow (no cost) |
+| `placeScInfluence(playerId, caseId, amount)` | FREE action. Parties of the active case only; spends water cubes |
+| `activateProtestActivist(playerId, instanceId)` | FREE, out-of-turn during a protest; one per player |
+| `depositToWaterBank(depositorId, ownerId, cubeCount)` | FREE action. Any player (incl. the owner) stores cubes, $1/cube to owner |
+| `withdrawFromWaterBank(ownerId, cubeCount)` | FREE action. Retrieve own stored cubes |
+| `resolveChoice(choiceData)` | Resolve a pendingEffect that required player input; then completes any deferred turn advance |
+| `undo()` / `redo()` | 20-state snapshot stack (pendingEffects snapshotted in parallel) |
+| `endPlayerTurn()` | Legacy: advance turn without acting (does NOT reset the pass counter) |
 
 ---
 
@@ -410,10 +431,41 @@ src/
 - **`donate_to_sc_justice`** (Docket swap): resolveChoice handler `docket_swap` implemented via `commitDocketSwap`.
 - **Water supply formula**: confirmed as sum of all Water Rights track values ± event modifier (not a shared pool separate from tracks).
 - **SC case tie**: tie = no winner, no loser, no rewards or penalties (plaintiff does NOT win ties — unlike earlier implementation; this is correct per rules).
+- **SC influence model**: influence accumulates on the front docket case
+  across rounds (via lawyer C abilities and 1💧 → 1 influence, parties only);
+  an SC Session event resolves the case immediately with the accumulated
+  totals. Third parties cannot place influence.
+- **Service Worker A doubling**: doubles the MONEY portion of the first
+  fully-watered income project only (the PR penalty is not doubled) —
+  design decision, RULES wording was ambiguous.
+- **Protest cards added to the Event deck** (Activist B N / Service Worker B C)
+  are inserted at a random position in the remaining deck so they can
+  actually be drawn during rounds 2–7.
 
 ---
 
-## 20. File Locations
+## 20. Online Multiplayer (src/net/netStore.js)
+
+- **Host-authoritative P2P** via PeerJS (WebRTC; free public broker for
+  signalling; no game server).
+- Modes: `local` (pass-and-play, default), `host`, `guest`.
+- Host creates a room code (e.g. `K7Q2M`); guests join from the same site.
+- Lobby: each connected player claims a faction; host starts (2–6 players).
+- Guests' store actions are replaced by stubs that forward
+  `{t:'action', name, args}` to the host; the host validates **seat
+  ownership** (and active-turn for pass) before executing, then broadcasts
+  the serialized state (undo stacks stripped, log capped at 200) to all
+  guests after every store change.
+- Host-only controls: Advance, Undo/Redo, Resolve Protest.
+- Hidden info: clients only see card faces for hands of seats they control.
+- Reconnect: a guest who rejoins with the same name is matched to their
+  disconnected seat and re-synced.
+- Hosting: GitHub Pages (`.github/workflows/deploy.yml`, `base` set in
+  vite.config.js).
+
+---
+
+## 21. File Locations
 
 | File | Purpose |
 |---|---|

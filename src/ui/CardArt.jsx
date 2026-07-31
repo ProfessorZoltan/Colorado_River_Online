@@ -17,7 +17,7 @@ import { CardFarmerA, CardServiceWorkerA, CardServiceWorkerB, CardFirefighterA }
   from '../../artwork/citizen-cards.jsx';
 import { CardProtestA, CardProtestB, CardSevereDrought, CardLargeSnowMelt, CardSCSession }
   from '../../artwork/event-cards.jsx';
-import { CardAdjudicator, CardProBono, CardCorporateCounsel, CardWaterSpecialist }
+import { CardAdjudicator, CardProBono }
   from '../../artwork/lawyer-cards_1.jsx';
 import { CardAntiEnv, CardItsAJob, CardTeamPlayer, CardWorkaholic,
          CardRiderCoattails, CardInItForGlory }
