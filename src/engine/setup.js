@@ -22,6 +22,7 @@ import {
   EXHAUST_STATES,
   MARKET_SIZES,
   STRATEGY_DEAL,
+  CITIZEN_SUPPLY,
 } from './constants.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,6 +168,7 @@ function buildPlayerState(playerConfig, factionDef, boardTemplate) {
     prTrack:         buildTrack(tracks.pr,           sv.pr_track),
 
     vp:               0,
+    cash:             0,  // Money in hand; the money track is INCOME, paid out as cash each Round Setup
     waterCubes:       0,  // Physical water cubes (SC influence, water bank, bribe)
     waterClaims:      0,  // Per-round claim tokens — set at Round Setup, spent in Consume
     protestInfluence: 0,
@@ -254,6 +256,18 @@ export function buildInitialState(playerConfigs, cards, playerBoardSchema, share
     strategyDeck = remaining;
   }
 
+  // ── Citizen supply (finite piles keyed by project citizen_type) ───────────
+  // Each pile is shuffled once at setup; Housing's pile mixes A and B.
+  const citizenSupply = {};
+  for (const [cardId, copies] of Object.entries(CITIZEN_SUPPLY)) {
+    const card = cards.find(c => c.id === cardId);
+    if (!card) continue;
+    const typeKey = card.name.toLowerCase().replace(/\s+[a-z]$/, '').replace(/\s+/g, '_');
+    citizenSupply[typeKey] = [...(citizenSupply[typeKey] ?? []),
+      ...Array.from({ length: copies }, () => cardId)];
+  }
+  for (const k of Object.keys(citizenSupply)) citizenSupply[k] = shuffle(citizenSupply[k]);
+
   // ── Event deck ────────────────────────────────────────────────────────────
   const eventIds = expandComposition(EVENT_DECK_COMPOSITION);
   const eventDeck = shuffle(eventIds);
@@ -297,6 +311,7 @@ export function buildInitialState(playerConfigs, cards, playerBoardSchema, share
       eventDeck,
       activeEvent:  null,
       docket:       docketCaseIds,
+      citizenSupply,
       waterSupply:  0,   // Determined at start of WATER phase
       casesResolvedThisRound: [], // [{caseId, winnerId}] — cleared each cleanup
     },

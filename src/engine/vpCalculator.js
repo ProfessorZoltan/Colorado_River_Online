@@ -114,17 +114,17 @@ export function calculateFinalScores(state) {
       breakdown,
       // Tiebreakers, in RULES §17 order
       waterClaimTrack: player.waterClaimTrack.value,
-      moneyTrack:      player.moneyTrack.value,
+      cash:            player.cash ?? 0,
       prTrack:         player.prTrack.value,
       waterCubes:      player.waterCubes ?? 0,
     };
   });
 
-  // RULES §17 tiebreaker order: VP → Water Rights → Money → PR → water cubes
+  // RULES §17 tiebreaker order: VP → Water Rights → cash → PR → water cubes
   const compare = (a, b) =>
     (b.total - a.total) ||
     (b.waterClaimTrack - a.waterClaimTrack) ||
-    (b.moneyTrack - a.moneyTrack) ||
+    (b.cash - a.cash) ||
     (b.prTrack - a.prTrack) ||
     (b.waterCubes - a.waterCubes);
 

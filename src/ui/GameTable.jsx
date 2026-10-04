@@ -25,7 +25,7 @@ function GlobalStyles() {
         --pr-pos: #7eb87e; --pr-neg: #c46060;
         --money: #c8a550; --vp: #d4b060;
         --lawyer: #c8a550; --activist: #7eb87e;
-        --citizen: #6b9ec8; --strategy: #a07ec8; --event: #c86060;
+        --citizen: #d4882a; --strategy: #a07ec8; --event: #c86060;
       }
       html, body, #root { height: 100%; }
       body { background: var(--bg0); color: var(--t1); font-family: 'EB Garamond', Georgia, serif; overflow: auto; }
@@ -459,7 +459,7 @@ function MarketGrid({
           if (showButtons && marketType === 'lawyer') {
             const cardDef = CARD_INDEX[cardId];
             const pr      = activePlayer.prTrack?.value ?? 0;
-            const money   = activePlayer.moneyTrack?.value ?? 0;
+            const money   = activePlayer.cash ?? 0;
             const disc    = activePlayer.pendingLawyerDiscount ?? 0;
             // Law Firm flow open → flat ability fee (minus Team Player discount)
             cost = partnershipFlow
@@ -473,7 +473,7 @@ function MarketGrid({
 
           if (showButtons && marketType === 'activist') {
             const hasBusiness = activePlayer.partnerships?.business;
-            const money       = activePlayer.moneyTrack?.value ?? 0;
+            const money       = activePlayer.cash ?? 0;
             cost = PARTNERSHIP_ABILITY_FEES.activist;
             if (!hasBusiness)      { reason = 'Need Business'; }
             else if (money < cost) { reason = `Need $${cost}`; }
@@ -655,7 +655,7 @@ const PARTNERSHIP_DEFS = [
  *   onBuy            fn(partnershipId)
  *   onUse            fn(partnershipId)
  */
-function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pendingLawyerDiscount = 0, onBuy, onUse }) {
+function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pendingLawyerDiscount = 0, onBuy, onUse, turnUsage = {} }) {
   return (
     <div>
       <Label>Partnerships</Label>
@@ -672,7 +672,8 @@ function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pend
         {PARTNERSHIP_DEFS.map((p) => {
           const owned       = partnerships[p.id];
           const canAffordBuy = money >= p.buyCost;
-          const canAffordUse = money >= p.buyCost; // ability cost = same value
+          const usedThisTurn = !!turnUsage[`partnership:${p.id}`];
+          const canAffordUse = money >= p.buyCost && !usedThisTurn; // ability cost = buy cost; once per turn
 
           return (
             <div key={p.id} className={`p-badge ${owned ? "owned" : ""}`}
@@ -715,7 +716,7 @@ function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pend
                   onClick={() => onUse?.(p.id)}
                   onMouseEnter={e => { if (canAffordUse) e.currentTarget.style.background = "var(--gold)22"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                  title={canAffordUse ? `Use ${p.label} ability ($${p.buyCost})` : `Need $${p.buyCost}`}
+                  title={usedThisTurn ? 'Already used this turn' : canAffordUse ? `Use ${p.label} ability ($${p.buyCost})` : `Need $${p.buyCost}`}
                   style={{
                     width: "100%", padding: "3px 0",
                     background: "transparent",
@@ -753,10 +754,12 @@ function PartnershipsRow({ partnerships, isActivePlayer = false, money = 0, pend
  */
 function WaterBankWidget({
   waterBank, isActivePlayer = false, player, allPlayers = {}, playerOrder = [],
-  onUnlock, onDeposit, onWithdraw,
+  onUnlock, onDeposit, onWithdraw, turnUsage = {},
 }) {
+  const depositUsed  = !!turnUsage.bank_deposit;
+  const withdrawUsed = !!turnUsage.bank_withdraw;
   const { unlocked, stored } = waterBank;
-  const canAffordUnlock = (player?.moneyTrack?.value ?? 0) >= 8;
+  const canAffordUnlock = (player?.cash ?? 0) >= 8;
   const canWithdraw     = unlocked && stored > 0;
 
   // ANY unlocked bank accepts deposits — including the depositor's own
@@ -809,8 +812,9 @@ function WaterBankWidget({
 
           {unlocked && canWithdraw && (
             <button
-              onClick={() => onWithdraw?.(stored)}
-              title={`Withdraw all ${stored} cube(s) for free`}
+              disabled={withdrawUsed}
+              onClick={() => !withdrawUsed && onWithdraw?.(stored)}
+              title={withdrawUsed ? "Already withdrew this turn" : `Withdraw all ${stored} cube(s) for free`}
               onMouseEnter={e => { e.currentTarget.style.background = "var(--water)22"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
               style={miniBtn("var(--water-bright)")}>
@@ -818,14 +822,16 @@ function WaterBankWidget({
             </button>
           )}
 
-          {/* Deposit 1 cube for $1 into any unlocked bank (own bank included) */}
+          {/* Deposit 1 cube into any unlocked bank: $1 to the owner, free into your own */}
           {depositBanks.map(owner => {
             const isOwn      = owner.id === player?.id;
             const hasSpace   = owner.waterBank.stored < 9;
-            const canDeposit = hasSpace
+            const fee        = isOwn ? 0 : 1;
+            const canDeposit = hasSpace && !depositUsed
               && (player?.waterCubes ?? 0) >= 1
-              && (player?.moneyTrack?.value ?? 0) >= 1;
-            const reason = !hasSpace ? "Bank is full"
+              && (player?.cash ?? 0) >= fee;
+            const reason = depositUsed ? "Already deposited this turn"
+              : !hasSpace ? "Bank is full"
               : (player?.waterCubes ?? 0) < 1 ? "Need 1 water cube"
               : "Need $1";
             return (
@@ -834,7 +840,8 @@ function WaterBankWidget({
                 disabled={!canDeposit}
                 onClick={() => canDeposit && onDeposit?.(owner.id, 1)}
                 title={canDeposit
-                  ? `Deposit 1 cube into ${isOwn ? "your own" : `${owner.name}'s`} bank ($1)`
+                  ? (isOwn ? "Store 1 cube in your own bank (free: no fee, no income)"
+                           : `Deposit 1 cube into ${owner.name}'s bank ($1 to ${owner.name})`)
                   : reason}
                 onMouseEnter={e => { if (canDeposit) e.currentTarget.style.background = "var(--water)11"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
@@ -896,8 +903,14 @@ function PlayerBoard({
   onUnlockBank, onDeposit, onWithdraw,
   onPlaceScInfluence,
   onPlaceWater,
+  turnUsage = {},
 }) {
   const fColor  = FACTION_COLORS[player.factionId] || "var(--terra)";
+  const activeCaseDef = activeCaseId ? CARD_INDEX[activeCaseId] : null;
+  const isCaseParty   = !!activeCaseDef && (activeCaseDef.plaintiff?.id === player.factionId
+                                         || activeCaseDef.defendant?.id === player.factionId);
+  const scUsed        = !!turnUsage.sc_influence;
+  const canPlaceSc    = isCaseParty && !scUsed && (player.waterCubes ?? 0) >= 1;
   const prValue = player.prTrack?.value ?? 0;
 
   return (
@@ -933,6 +946,8 @@ function PlayerBoard({
               ◈×{player.waterClaims}
             </span>
           )}
+          <span className="f-mono" title="Cash in hand (kept across rounds)"
+            style={{ fontSize: 13, color: "var(--money)" }}>${player.cash ?? 0}</span>
           <span style={{ fontSize: 11 }}>💧</span>
           <span className="f-mono" style={{ fontSize: 13, color: "var(--water)" }}>{player.waterCubes}</span>
         </div>
@@ -940,8 +955,8 @@ function PlayerBoard({
 
       {/* Tracks */}
       <div>
-        <TrackWidget track={player.waterClaimTrack} trackKey="waterClaimTrack" label="Water Claim" icon="◈" />
-        <TrackWidget track={player.moneyTrack}      trackKey="moneyTrack"      label="Money"       icon="$" />
+        <TrackWidget track={player.waterClaimTrack} trackKey="waterClaimTrack" label="Water Rights" icon="◈" />
+        <TrackWidget track={player.moneyTrack}      trackKey="moneyTrack"      label="Income (paid each round)" icon="$" />
         <TrackWidget track={player.prTrack}         trackKey="prTrack"         label="PR"          icon="★" />
       </div>
 
@@ -968,7 +983,8 @@ function PlayerBoard({
         <PartnershipsRow
           partnerships={player.partnerships}
           isActivePlayer={isActivePlayer}
-          money={player.moneyTrack?.value ?? 0}
+          money={player.cash ?? 0}
+          turnUsage={turnUsage}
           pendingLawyerDiscount={player.pendingLawyerDiscount ?? 0}
           onBuy={onBuyPartnership}
           onUse={onUsePartnership}
@@ -982,6 +998,7 @@ function PlayerBoard({
           onUnlock={onUnlockBank}
           onDeposit={onDeposit}
           onWithdraw={onWithdraw}
+          turnUsage={turnUsage}
         />
       </div>
 
@@ -1006,21 +1023,24 @@ function PlayerBoard({
               </span>
               <span className="f-mono" style={{ fontSize: 9, color: "var(--t4)" }}>influence</span>
               <button
-                disabled={(player.waterCubes ?? 0) < 1}
-                onClick={() => onPlaceScInfluence?.(activeCaseId, 1)}
-                title="Place 1 SC influence (costs 1 water cube)"
-                onMouseEnter={e => { if ((player.waterCubes ?? 0) >= 1) e.currentTarget.style.background = "var(--gold)22"; }}
+                disabled={!canPlaceSc}
+                onClick={() => canPlaceSc && onPlaceScInfluence?.(activeCaseId, 1)}
+                title={!isCaseParty ? "Only the plaintiff and defendant may place influence"
+                  : scUsed ? "Already placed influence this turn"
+                  : (player.waterCubes ?? 0) < 1 ? "Needs 1 water cube"
+                  : "Place 1 SC influence (costs 1 water cube; once per turn)"}
+                onMouseEnter={e => { if (canPlaceSc) e.currentTarget.style.background = "var(--gold)22"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
                 style={{
                   background: "transparent",
-                  border: `1px solid ${(player.waterCubes ?? 0) >= 1 ? "var(--gold)" : "var(--b1)"}`,
+                  border: `1px solid ${canPlaceSc ? "var(--gold)" : "var(--b1)"}`,
                   borderRadius: 2,
-                  color: (player.waterCubes ?? 0) >= 1 ? "var(--gold)" : "var(--t4)",
+                  color: canPlaceSc ? "var(--gold)" : "var(--t4)",
                   fontFamily: "'Courier Prime', monospace",
                   fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
                   padding: "3px 10px",
-                  cursor: (player.waterCubes ?? 0) >= 1 ? "pointer" : "not-allowed",
-                  opacity: (player.waterCubes ?? 0) >= 1 ? 1 : 0.4,
+                  cursor: canPlaceSc ? "pointer" : "not-allowed",
+                  opacity: canPlaceSc ? 1 : 0.4,
                   transition: "all 0.12s",
                 }}>
                 +1 (💧)
@@ -1710,7 +1730,7 @@ function ChoiceResolutionModal({
               <div style={{ width: 7, height: 7, borderRadius: 1, background: fC }} />
               <span className="f-body" style={{ fontSize: 12, color: 'var(--t1)', flex: 1 }}>{opp.name}</span>
               <span className="f-mono" style={{ fontSize: 9, color: 'var(--water)' }}>{opp.waterCubes} 💧</span>
-              <span className="f-mono" style={{ fontSize: 9, color: 'var(--money)' }}>${opp.moneyTrack.value}</span>
+              <span className="f-mono" style={{ fontSize: 9, color: 'var(--money)' }}>${opp.cash ?? 0}</span>
               {selA === pid && <span className="f-mono" style={{ fontSize: 9, color: 'var(--terra)' }}>✓</span>}
             </div>
           );
@@ -1982,6 +2002,7 @@ function ChoiceResolutionModal({
     // Cases resolved THIS ROUND where the active player was not a party
     const resolvedThisRound = state.sharedBoard.casesResolvedThisRound ?? [];
     const uninvolvedCases = resolvedThisRound
+      .filter(r => r.winnerId != null)
       .map(r => r.caseId)
       .filter(caseId => {
         const caseDef = CARD_INDEX[caseId];
@@ -2686,6 +2707,7 @@ function GameTableInner() {
               activeCaseId={activeCaseId}
               allPlayers={state.players}
               playerOrder={state.playerOrder}
+              turnUsage={state.turnUsage ?? {}}
               onPlayCard={handlePlayCard}
               onBuyPartnership={handleBuyPartnership}
               onUsePartnership={handleUsePartnership}

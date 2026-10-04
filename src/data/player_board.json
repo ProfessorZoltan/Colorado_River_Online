@@ -29,7 +29,7 @@
         "threshold_markers": []
       },
       "money": {
-        "resource_id": "money",
+        "resource_id": "income",
         "min": 0,
         "max": 19,
         "hard_cap": false,
@@ -139,7 +139,7 @@
         "water_slots": 6,
         "fully_watered_reward": [
           {
-            "resource": "money",
+            "resource": "income",
             "amount": 5
           },
           {
@@ -155,7 +155,7 @@
         "water_slots": 4,
         "fully_watered_reward": [
           {
-            "resource": "money",
+            "resource": "income",
             "amount": 3
           },
           {
@@ -171,7 +171,7 @@
         "water_slots": 2,
         "fully_watered_reward": [
           {
-            "resource": "money",
+            "resource": "income",
             "amount": 1
           },
           {

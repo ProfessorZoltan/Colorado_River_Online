@@ -47,7 +47,8 @@ export const CARD_TYPES = {
 export const RESOURCES = {
   WATER_CLAIM: 'water_claim',             // Track position
   WATER_CLAIM_TRACK: 'water_claim_track', // Alias used in some card rewards
-  MONEY:       'money',
+  MONEY:       'money',             // Cash in hand (kept across rounds)
+  INCOME:      'income',            // Income track position (the "money track"); paid out as cash each Round Setup
   PR:          'pr',
   WATER:       'water',             // Physical blue cubes (SC, water bank, bribe)
   WATER_CLAIMS_TOKEN: 'water_claims_token', // Per-round claim tokens gained at Round Setup
@@ -139,6 +140,14 @@ export const SC_CASE_LOSER_PENALTY = [
   { resource: RESOURCES.MONEY,            amount: -2 },
   { resource: RESOURCES.PR,               amount: -1 },
 ];
+
+// ── Citizen card supply (finite; Housing draws A/B from one shuffled pile) ──
+export const CITIZEN_SUPPLY = {
+  farmer_a:         6,
+  service_worker_a: 6,
+  service_worker_b: 6,
+  firefighter_a:   10,
+};
 
 // ── Exhaust states ────────────────────────────────────────────────────────
 export const EXHAUST_STATES = {

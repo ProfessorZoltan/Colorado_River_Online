@@ -30,7 +30,7 @@ import { EXHAUST_STATES, CARD_TYPES, LAWYER_ACQUISITION_SURCHARGE, PHASES,
          WATER_BANK, PARTNERSHIP_COSTS, PARTNERSHIP_ABILITY_COSTS, MAX_ROUNDS,
          WATER_PENALTY_FIRST_ROUND, INFO_REVEALING_ACTIONS }
   from './constants.js';
-import { lawyerAcquisitionCost, canAcquireWithPr, applyTrackDelta,
+import { lawyerAcquisitionCost, canAcquireWithPr, applyTrackDelta, applyCashDelta,
          applyWaterCubeDelta }
   from './trackManager.js';
 
@@ -120,31 +120,38 @@ function autoResolvePending(state, pendingEffects, boardTemplate) {
       }
 
       case 'grant_citizen_card': {
-        // Find a citizen card of the specified type in the cardIndex.
-        // citizen_type uses underscores ("service_worker") while card names
-        // use spaces ("Service Worker A") — normalize before matching.
-        const wanted = (effect.citizen_type ?? '').toLowerCase().replace(/_/g, ' ');
-        const citizenCard = Object.values(current.cardIndex).find(
-          c => c.type === CARD_TYPES.CITIZEN &&
-               c.name?.toLowerCase().includes(wanted)
-        );
-        if (citizenCard) {
-          const instance = { instanceId: `${citizenCard.id}_${nextId()}`, cardId: citizenCard.id, exhaustState: EXHAUST_STATES.READY };
-          const player   = current.players[effect.playerId];
+        // Draw from the finite citizen supply pile for this type
+        // (built in setup.js; Housing's pile mixes Service Worker A and B).
+        const supply = current.sharedBoard.citizenSupply ?? {};
+        const pile   = supply[effect.citizen_type] ?? [];
+        const player = current.players[effect.playerId];
+        if (pile.length === 0) {
           current = applyUpdate(current, {
-            playerPatches: { [effect.playerId]: { tableau: [...player.tableau, instance] } },
-            sharedPatches: {},
-            logEntries: [{ type: 'citizen_card_added', playerId: effect.playerId, cardId: citizenCard.id,
-              message: `${player.name} adds ${citizenCard.name} to their tableau` }],
-            pendingEffects: [],
+            playerPatches: {}, sharedPatches: {}, pendingEffects: [],
+            logEntries: [{ type: 'citizen_supply_empty', playerId: effect.playerId,
+              message: `No ${effect.citizen_type.replace(/_/g, ' ')} cards left — ${player.name} gets no citizen card` }],
           });
+          break;
         }
+        const [cardId, ...rest] = pile;
+        const citizenCard = current.cardIndex[cardId];
+        const instance = { instanceId: `${cardId}_${nextId()}`, cardId, exhaustState: EXHAUST_STATES.READY };
+        current = applyUpdate(current, {
+          playerPatches: { [effect.playerId]: { tableau: [...player.tableau, instance] } },
+          sharedPatches: { citizenSupply: { ...supply, [effect.citizen_type]: rest } },
+          logEntries: [{ type: 'citizen_card_added', playerId: effect.playerId, cardId,
+            message: `${player.name} adds ${citizenCard?.name ?? cardId} to their tableau (${rest.length} left)` }],
+          pendingEffects: [],
+        });
         break;
       }
 
       case 'register_income_modifier': {
+        // Each modifier counts once per player per round, however many
+        // copies of the card were used. Cleared after the End Step pays out.
         const existing = current.pendingIncomeModifiers ?? [];
-        current = { ...current, pendingIncomeModifiers: [...existing, effect] };
+        const dup = existing.some(m => m.subtype === effect.subtype && m.playerId === effect.playerId);
+        if (!dup) current = { ...current, pendingIncomeModifiers: [...existing, effect] };
         break;
       }
 
@@ -273,10 +280,33 @@ export const useGameStore = create((set, get) => ({
 
   _advanceTurn() {
     const { gameState } = get();
-    set({ pendingTurnAdvance: false });
+    set(s => ({ pendingTurnAdvance: false,
+      pendingEffects: s.pendingEffects.filter(e => e.type !== 'pending_partnership_acquire') }));
     if (!isActionPhase(gameState.phase)) return;
     const { nextPlayerIndex } = advancePlayerTurn(gameState);
-    set(s => ({ gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex } }));
+    set(s => ({ gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex, turnUsage: {} } }));
+  },
+
+  /**
+   * Free actions (partnership abilities, water bank, SC influence) may each
+   * be used once per turn, on your own turn, and again on later turns.
+   * gameState.turnUsage records what the active player has used; it resets
+   * whenever the active player changes.
+   */
+  _canUseThisTurn(playerId, key) {
+    const gs = get().gameState;
+    if (gs.playerOrder[gs.activePlayerIndex] !== playerId) {
+      console.warn(`${key}: only on your own turn`); return false;
+    }
+    if (gs.turnUsage?.[key]) {
+      console.warn(`${key}: already used this turn`); return false;
+    }
+    return true;
+  },
+
+  _markUsedThisTurn(key) {
+    set(s => ({ gameState: { ...s.gameState,
+      turnUsage: { ...(s.gameState.turnUsage ?? {}), [key]: true } } }));
   },
 
   // ── Phase management ──────────────────────────────────────────────────────
@@ -317,9 +347,13 @@ export const useGameStore = create((set, get) => ({
       if (_nextFirstPlayerIndex != null)
         gs = { ...gs, firstPlayerIndex: _nextFirstPlayerIndex };
       if (_activePlayerIndex != null)
-        gs = { ...gs, activePlayerIndex: _activePlayerIndex, consecutivePasses: 0 };
+        gs = { ...gs, activePlayerIndex: _activePlayerIndex, consecutivePasses: 0, turnUsage: {} };
       if (_consecutivePasses != null)
         gs = { ...gs, consecutivePasses: _consecutivePasses };
+      // Income modifiers (Farmer A, Service Worker A, Firefighter A) last one
+      // round: the End Step just paid them out, so clear them now.
+      if (phase === PHASES.END_STEP)
+        gs = { ...gs, pendingIncomeModifiers: [] };
       return { gameState: gs, pendingTurnAdvance: false };
     });
 
@@ -440,7 +474,7 @@ export const useGameStore = create((set, get) => ({
       pendingEffects: [],
     });
     set(s => ({
-      gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex },
+      gameState: { ...s.gameState, activePlayerIndex: nextPlayerIndex, turnUsage: {} },
     }));
   },
 
@@ -459,6 +493,7 @@ export const useGameStore = create((set, get) => ({
     const { nextPlayerIndex } = advancePlayerTurn(gameState);
     const pid       = gameState.playerOrder[gameState.activePlayerIndex];
     const newPasses = (gameState.consecutivePasses ?? 0) + 1;
+    set(s => ({ pendingEffects: s.pendingEffects.filter(e => e.type !== 'pending_partnership_acquire') }));
 
     _dispatch({
       playerPatches:  {},
@@ -474,7 +509,7 @@ export const useGameStore = create((set, get) => ({
     } else {
       set(s => ({
         gameState: { ...s.gameState,
-          activePlayerIndex: nextPlayerIndex,
+          activePlayerIndex: nextPlayerIndex, turnUsage: {},
           consecutivePasses: newPasses },
       }));
     }
@@ -510,7 +545,7 @@ export const useGameStore = create((set, get) => ({
 
     // Standard acquisition consumes your turn — it must BE your turn
     const activePlayer = gameState.playerOrder[gameState.activePlayerIndex];
-    if (!viaPartnership && activePlayer !== playerId) {
+    if (activePlayer !== playerId) {
       console.warn(`acquireLawyer: not ${playerId}'s turn`); return;
     }
 
@@ -527,8 +562,8 @@ export const useGameStore = create((set, get) => ({
       cost = Math.max(0, cost - player.pendingLawyerDiscount);
     }
 
-    if (player.moneyTrack.value < cost) {
-      console.warn(`acquireLawyer: insufficient money (need ${cost}, have ${player.moneyTrack.value})`);
+    if ((player.cash ?? 0) < cost) {
+      console.warn(`acquireLawyer: insufficient money (need ${cost}, have ${(player.cash ?? 0)})`);
       return;
     }
 
@@ -540,7 +575,7 @@ export const useGameStore = create((set, get) => ({
 
     const instance = { instanceId: `${cardId}_${nextId()}`, cardId, exhaustState: EXHAUST_STATES.READY };
     const { playerPatch: moneyPatch, logEntries: moneyLog } =
-      applyTrackDelta(player, 'money', -cost, `acquire lawyer: ${cardDef.name}`);
+      applyCashDelta(player, -cost, `acquire lawyer: ${cardDef.name}`);
 
     _dispatch({
       playerPatches: {
@@ -572,8 +607,10 @@ export const useGameStore = create((set, get) => ({
               && e.marketType === 'lawyer')
       ),
     }));
-    // Standard acquisition is a turn action; partnership acquisition is free
-    if (!viaPartnership) get()._afterTurnAction();
+    // Standard acquisition is a turn action; partnership acquisition is a
+    // free action, usable once per turn
+    if (viaPartnership) get()._markUsedThisTurn('partnership:law_firm');
+    else get()._afterTurnAction();
   },
 
   /**
@@ -604,13 +641,13 @@ export const useGameStore = create((set, get) => ({
     );
 
     const activePlayer = gameState.playerOrder[gameState.activePlayerIndex];
-    if (!viaPartnership && activePlayer !== playerId) {
+    if (activePlayer !== playerId) {
       console.warn(`acquireActivist: not ${playerId}'s turn`); return;
     }
 
     // Business partnership cost: $3 per activist
     const cost = PARTNERSHIP_ABILITY_COSTS.business.amount;
-    if (player.moneyTrack.value < cost) {
+    if ((player.cash ?? 0) < cost) {
       console.warn(`acquireActivist: insufficient money`);
       return;
     }
@@ -624,7 +661,7 @@ export const useGameStore = create((set, get) => ({
     const instance = { instanceId: `${cardId}_${nextId()}`, cardId, exhaustState: EXHAUST_STATES.READY };
     const cardDef  = gameState.cardIndex[cardId];
     const { playerPatch: moneyPatch, logEntries: moneyLog } =
-      applyTrackDelta(player, 'money', -cost, `acquire activist: ${cardDef.name}`);
+      applyCashDelta(player, -cost, `acquire activist: ${cardDef.name}`);
 
     _dispatch({
       playerPatches: { [playerId]: { ...moneyPatch, tableau: [...player.tableau, instance] } },
@@ -643,7 +680,8 @@ export const useGameStore = create((set, get) => ({
               && e.marketType === 'activist')
       ),
     }));
-    if (!viaPartnership) get()._afterTurnAction();
+    if (viaPartnership) get()._markUsedThisTurn('partnership:business');
+    else get()._afterTurnAction();
   },
 
   /** Cancel an open partnership-acquire flow (no fee was charged yet). */
@@ -679,13 +717,13 @@ export const useGameStore = create((set, get) => ({
     }
 
     const cost = PARTNERSHIP_COSTS[partnershipId];
-    if (player.moneyTrack.value < cost) {
+    if ((player.cash ?? 0) < cost) {
       console.warn(`purchasePartnership: insufficient money`);
       return;
     }
 
     const { playerPatch: moneyPatch, logEntries } =
-      applyTrackDelta(player, 'money', -cost, `purchase partnership: ${partnershipId}`);
+      applyCashDelta(player, -cost, `purchase partnership: ${partnershipId}`);
 
     _dispatch({
       playerPatches: {
@@ -727,14 +765,15 @@ export const useGameStore = create((set, get) => ({
     const abilityCost = PARTNERSHIP_ABILITY_COSTS[partnershipId];
     if (!abilityCost) { console.warn(`usePartnershipAbility: unknown id ${partnershipId}`); return; }
 
-    if (player.moneyTrack.value < abilityCost.amount) {
+    if ((player.cash ?? 0) < abilityCost.amount) {
       console.warn(`usePartnershipAbility: insufficient money`); return;
     }
+    if (!get()._canUseThisTurn(playerId, `partnership:${partnershipId}`)) return;
 
     if (partnershipId === 'investment') {
       // Investment: pay $2, gain 1 PR immediately
       const { playerPatch: moneyPatch, logEntries: moneyLog, pendingEffects: moneyFx } =
-        applyTrackDelta(player, 'money', -abilityCost.amount, `${partnershipId} partnership ability`);
+        applyCashDelta(player, -abilityCost.amount, `${partnershipId} partnership ability`);
       const { playerPatch: prPatch, logEntries: prLog, pendingEffects: prFx } =
         applyTrackDelta({ ...player, ...moneyPatch }, 'pr', 1, 'investment partnership');
 
@@ -748,6 +787,7 @@ export const useGameStore = create((set, get) => ({
         ],
         pendingEffects: [...moneyFx, ...prFx],
       });
+      get()._markUsedThisTurn('partnership:investment');
       return;
     }
 
@@ -789,12 +829,13 @@ export const useGameStore = create((set, get) => ({
 
     if (!isActionPhase(gameState.phase)) { console.warn('unlockWaterBank: not an action phase'); return; }
     if (player.waterBank.unlocked) { console.warn('unlockWaterBank: already unlocked'); return; }
-    if (player.moneyTrack.value < WATER_BANK.UNLOCK_COST) {
+    if (!get()._canUseThisTurn(playerId, 'bank_unlock')) return;
+    if ((player.cash ?? 0) < WATER_BANK.UNLOCK_COST) {
       console.warn(`unlockWaterBank: need $${WATER_BANK.UNLOCK_COST}`); return;
     }
 
     const { playerPatch: moneyPatch, logEntries, pendingEffects } =
-      applyTrackDelta(player, 'money', -WATER_BANK.UNLOCK_COST, 'unlock water bank');
+      applyCashDelta(player, -WATER_BANK.UNLOCK_COST, 'unlock water bank');
 
     _dispatch({
       playerPatches: { [playerId]: { ...moneyPatch, waterBank: { unlocked: true, stored: 0 } } },
@@ -808,52 +849,64 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
-   * Deposit water cubes into the bank owner's water bank.
-   * The depositing player pays $1 per cube to the bank owner.
+   * Deposit water cubes into a water bank (free action, once per turn).
+   * Depositing into SOMEONE ELSE's bank costs $1 per cube, paid to the owner.
+   * Depositing into YOUR OWN bank is allowed but free — the owner never
+   * earns deposit income from their own cubes.
    * @param {string} depositorId  — the player depositing cubes
-   * @param {string} ownerId      — the bank owner (receives $1 per cube)
+   * @param {string} ownerId      — the bank owner
    * @param {number} cubeCount
    */
   depositToWaterBank(depositorId, ownerId, cubeCount) {
     const { gameState, _dispatch } = get();
     const depositor = gameState.players[depositorId];
     const owner     = gameState.players[ownerId];
+    const isOwnBank = depositorId === ownerId;
 
     if (!isActionPhase(gameState.phase)) { console.warn('depositToWaterBank: not an action phase'); return; }
     if (!owner.waterBank.unlocked) { console.warn('depositToWaterBank: bank not unlocked'); return; }
+    if (!get()._canUseThisTurn(depositorId, 'bank_deposit')) return;
 
     const available = owner.waterBank.stored;
-    const capacity  = WATER_BANK.CAPACITY;
-    const canStore  = capacity - available;
+    const canStore  = WATER_BANK.CAPACITY - available;
     const toStore   = Math.min(cubeCount, canStore, depositor.waterCubes);
-    const cost      = toStore * WATER_BANK.DEPOSIT_COST;
+    const cost      = isOwnBank ? 0 : toStore * WATER_BANK.DEPOSIT_COST;
 
-    if (toStore <= 0)                            { console.warn('depositToWaterBank: nothing to store'); return; }
-    if (depositor.moneyTrack.value < cost)       { console.warn(`depositToWaterBank: need $${cost}`); return; }
-    if (depositor.waterCubes < toStore)          { console.warn('depositToWaterBank: insufficient cubes'); return; }
+    if (toStore <= 0)                  { console.warn('depositToWaterBank: nothing to store'); return; }
+    if ((depositor.cash ?? 0) < cost)  { console.warn(`depositToWaterBank: need $${cost}`); return; }
 
-    // Depositor: lose cubes + pay cost
+    // Depositor: lose cubes (+ pay the owner, unless it's their own bank)
     const { playerPatch: cubePatch, logEntries: cubeLog } =
-      applyWaterCubeDelta(depositor, -toStore, `deposit to ${owner.name}'s water bank`);
-    const { playerPatch: payPatch, logEntries: payLog, pendingEffects: payFx } =
-      applyTrackDelta({ ...depositor, ...cubePatch }, 'money', -cost, `water bank deposit fee`);
+      applyWaterCubeDelta(depositor, -toStore, `deposit to ${isOwnBank ? 'own' : `${owner.name}'s`} water bank`);
+    const bankPatch = { waterBank: { ...owner.waterBank, stored: available + toStore } };
 
-    // Owner: receive payment + update bank
-    const { playerPatch: recvPatch, logEntries: recvLog, pendingEffects: recvFx } =
-      applyTrackDelta(owner, 'money', cost, `water bank income from ${depositor.name}`);
+    let playerPatches, payLogs = [];
+    if (isOwnBank) {
+      // One player, one patch — separate depositor/owner patches would
+      // overwrite each other (the source of the old duplication exploit).
+      playerPatches = { [depositorId]: { ...cubePatch, ...bankPatch } };
+    } else {
+      const pay  = applyCashDelta(depositor, -cost, `water bank deposit fee to ${owner.name}`);
+      const recv = applyCashDelta(owner, cost, `water bank income from ${depositor.name}`);
+      payLogs = [...pay.logEntries, ...recv.logEntries];
+      playerPatches = {
+        [depositorId]: { ...cubePatch, ...pay.playerPatch },
+        [ownerId]:     { ...recv.playerPatch, ...bankPatch },
+      };
+    }
 
     _dispatch({
-      playerPatches: {
-        [depositorId]: { ...cubePatch, ...payPatch },
-        [ownerId]:     { ...recvPatch, waterBank: { ...owner.waterBank, stored: available + toStore } },
-      },
+      playerPatches,
       sharedPatches: {},
-      logEntries: [...cubeLog, ...payLog, ...recvLog, {
+      logEntries: [...cubeLog, ...payLogs, {
         type: 'water_bank_deposit', depositorId, ownerId, cubeCount: toStore, cost,
-        message: `${depositor.name} deposits ${toStore} cube(s) into ${owner.name}'s water bank (paid $${cost})`,
+        message: isOwnBank
+          ? `${depositor.name} stores ${toStore} cube(s) in their own water bank`
+          : `${depositor.name} deposits ${toStore} cube(s) into ${owner.name}'s water bank (paid $${cost})`,
       }],
-      pendingEffects: [...payFx, ...recvFx],
+      pendingEffects: [],
     });
+    get()._markUsedThisTurn('bank_deposit');
   },
 
   /**
@@ -868,6 +921,7 @@ export const useGameStore = create((set, get) => ({
     if (!isActionPhase(gameState.phase)) { console.warn('withdrawFromWaterBank: not an action phase'); return; }
     if (!owner.waterBank.unlocked)   { console.warn('withdrawFromWaterBank: bank not unlocked'); return; }
     if (owner.waterBank.stored === 0){ console.warn('withdrawFromWaterBank: bank is empty'); return; }
+    if (!get()._canUseThisTurn(ownerId, 'bank_withdraw')) return;
 
     const toWithdraw = Math.min(cubeCount, owner.waterBank.stored);
     const { playerPatch: cubePatch, logEntries } =
@@ -885,6 +939,7 @@ export const useGameStore = create((set, get) => ({
       }],
       pendingEffects: [],
     });
+    get()._markUsedThisTurn('bank_withdraw');
   },
 
   // ── SC influence ──────────────────────────────────────────────────────────
@@ -917,6 +972,7 @@ export const useGameStore = create((set, get) => ({
     if (player.waterCubes < amount) {
       console.warn(`placeScInfluence: need ${amount} water cube(s)`); return;
     }
+    if (!get()._canUseThisTurn(playerId, 'sc_influence')) return;
 
     const { playerPatch: cubePatch, logEntries: cubeLog } =
       applyWaterCubeDelta(player, -amount, `SC influence on ${caseId}`);
@@ -934,6 +990,7 @@ export const useGameStore = create((set, get) => ({
       }],
       pendingEffects: [],
     });
+    get()._markUsedThisTurn('sc_influence');
   },
 
   /**
@@ -1094,7 +1151,23 @@ export const useGameStore = create((set, get) => ({
       case 'rider_coattails_lawyer': {
         // Re-run the chosen lawyer's N action on behalf of the rider player,
         // skipping payment (rider gains the reward, not the cost).
-        const { chosenCardId, playerId: rcPlayerId } = choiceData;
+        const { playerId: rcPlayerId } = choiceData;
+        // Valid target: one of YOUR lawyers, used (exhausted) this round,
+        // with an N action, costing more than Rider itself.
+        const riderCost = gameState.cardIndex.rider_of_coattails?.cost ?? 1;
+        const validTarget = (gameState.players[rcPlayerId]?.tableau ?? []).some(inst => {
+          const def = gameState.cardIndex[inst.cardId];
+          return inst.cardId === choiceData.chosenCardId
+            && inst.cardId !== 'rider_of_coattails'
+            && def?.type === CARD_TYPES.LAWYER
+            && inst.exhaustState === EXHAUST_STATES.EXHAUSTED
+            && (def.cost ?? 0) > riderCost
+            && !!def.actions?.N;
+        });
+        const chosenCardId = validTarget ? choiceData.chosenCardId : null;
+        if (choiceData.chosenCardId && !validTarget) {
+          console.warn(`rider_coattails_lawyer: invalid target ${choiceData.chosenCardId}`);
+        }
         if (chosenCardId) {
           const copiedDef  = gameState.cardIndex[chosenCardId];
           const baseUpdate = resolveCardAction(
@@ -1127,7 +1200,19 @@ export const useGameStore = create((set, get) => ({
 
       case 'rider_coattails_case': {
         // Apply the winner_reward of the chosen case to the rider player.
-        const { caseId: rcCaseId, playerId: rcPid } = choiceData;
+        const { playerId: rcPid } = choiceData;
+        // Valid target: a case resolved THIS round that had a winner (ties
+        // pay nothing) and that this player was not a party to.
+        const rcFaction = gameState.players[rcPid]?.factionId;
+        const validCase = (gameState.sharedBoard.casesResolvedThisRound ?? []).some(r => {
+          const def = gameState.cardIndex[r.caseId];
+          return r.caseId === choiceData.caseId && r.winnerId != null
+            && def?.plaintiff?.id !== rcFaction && def?.defendant?.id !== rcFaction;
+        });
+        const rcCaseId = validCase ? choiceData.caseId : null;
+        if (choiceData.caseId && !validCase) {
+          console.warn(`rider_coattails_case: invalid target ${choiceData.caseId}`);
+        }
         if (rcCaseId) {
           const caseDef = gameState.cardIndex[rcCaseId];
           let rcUpdate  = { ...emptyUpdate(), logEntries: [{

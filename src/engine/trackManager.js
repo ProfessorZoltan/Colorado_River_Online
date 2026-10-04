@@ -154,6 +154,35 @@ export function applyTrackDelta(playerState, trackKey, delta, reason = '') {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Cash (money in hand — kept across rounds; the money TRACK is income)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Adjust a player's cash. Cash never goes below 0 and has no ceiling.
+ * @param {Object} playerState
+ * @param {number} delta
+ * @param {string} reason
+ */
+export function applyCashDelta(playerState, delta, reason = '') {
+  const from   = playerState.cash ?? 0;
+  const newVal = Math.max(0, from + delta);
+  return {
+    playerPatch:    { cash: newVal },
+    logEntries:     [{
+      type:     'cash_change',
+      playerId: playerState.id,
+      from,
+      to:       newVal,
+      delta,
+      reason,
+      message:  `${playerState.name} ${delta >= 0 ? 'gains' : 'pays'} $${Math.abs(delta)} `
+              + `(cash $${from} → $${newVal})${reason ? ': ' + reason : ''}`,
+    }],
+    pendingEffects: [],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // VP direct grant (milestones, SC cases, card passives)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -223,7 +252,8 @@ export function applyWaterCubeDelta(playerState, delta, reason = '') {
 export function checkDiscardConditions(playerState, cardIndex) {
   const resources = {
     pr:          playerState.prTrack.value,
-    money:       playerState.moneyTrack.value,
+    money:       playerState.cash ?? 0,
+    income:      playerState.moneyTrack.value,
     water_claim: playerState.waterClaimTrack.value,
   };
 

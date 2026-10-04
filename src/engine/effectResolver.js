@@ -19,6 +19,7 @@ import {
   applyTrackDelta,
   grantVP,
   applyWaterCubeDelta,
+  applyCashDelta,
   checkDiscardConditions,
   lawyerAcquisitionCost,
   canAcquireWithPr,
@@ -80,10 +81,12 @@ function playerUpdate(playerId, patch, log = [], effects = []) {
 // Maps a resource string from cards.json to the correct track key
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 'money' is cash in hand (see applyCashDelta); the money TRACK is the income
+// track, addressed by the 'income' resource.
 const RESOURCE_TO_TRACK = {
   [RESOURCES.WATER_CLAIM]:       'water_claim',
   [RESOURCES.WATER_CLAIM_TRACK]: 'water_claim',
-  [RESOURCES.MONEY]:             'money',
+  [RESOURCES.INCOME]:            'money',
   [RESOURCES.PR]:                'pr',
 };
 
@@ -110,6 +113,11 @@ function applyResourceDelta(state, playerId, resource, amount, reason) {
 
   if (resource === RESOURCES.VP || resource === 'vp') {
     const { playerPatch, logEntries } = grantVP(player, amount, reason);
+    return playerUpdate(playerId, playerPatch, logEntries);
+  }
+
+  if (resource === RESOURCES.MONEY) {
+    const { playerPatch, logEntries } = applyCashDelta(player, amount, reason);
     return playerUpdate(playerId, playerPatch, logEntries);
   }
 
@@ -145,7 +153,11 @@ function applyPayments(state, playerId, payments) {
 
     // ── Affordability: a cost you cannot fully pay rejects the action ──────
     const trackKey = RESOURCE_TO_TRACK[p.resource];
-    if (trackKey) {
+    if (p.resource === RESOURCES.MONEY) {
+      if ((workingPlayer.cash ?? 0) < Math.abs(p.amount)) {
+        return { ok: false, update: null, error: `Insufficient cash to pay cost` };
+      }
+    } else if (trackKey) {
       const trackStateKey = { water_claim: 'waterClaimTrack', money: 'moneyTrack', pr: 'prTrack' }[trackKey];
       const current = workingPlayer[trackStateKey]?.value ?? 0;
       const min     = workingPlayer[trackStateKey]?.min   ?? 0;
@@ -559,6 +571,7 @@ export function resolveIncomePhase(state, playerId, boardTemplate, modifiers = [
   const myMods    = modifiers.filter(m => m.playerId === playerId);
   const farmerMod = myMods.find(m => m.subtype === 'farmer_a_farm_vp');
   let   swaMod    = myMods.find(m => m.subtype === 'service_worker_a_income_double');
+  const fireMod   = myMods.find(m => m.subtype === 'firefighter_a_vp');
 
   const allProjects = [
     ...boardTemplate.citizen_projects,
@@ -573,11 +586,23 @@ export function resolveIncomePhase(state, playerId, boardTemplate, modifiers = [
     if (playerProject.watered < projectDef.water_slots) continue;
 
     // Service Worker A: the first fully-watered income project doubles its
-    // money bonus this round (one project only).
+    // income/money bonus this round (one project only).
     const doubleMoney = !!swaMod && actualType === 'income';
     if (doubleMoney) swaMod = null;
 
-    for (const reward of (projectDef.fully_watered_reward ?? [])) {
+    // Firefighter A: a fully-watered firefighting project pays 1 VP per
+    // Firefighter in tableau INSTEAD of its usual bonus (PR + citizen card).
+    const firefighterSwap = !!fireMod && projectDef.id === 'firefighting';
+    if (firefighterSwap) {
+      const firefighters = workingPlayer.tableau
+        .filter(c => c.cardId === 'firefighter_a').length;
+      applyU(applyResourceDelta(
+        workingState(), playerId, RESOURCES.VP, firefighters,
+        `Firefighter A: ${firefighters} Firefighter(s) instead of the firefighting bonus`
+      ));
+    }
+
+    for (const reward of (firefighterSwap ? [] : (projectDef.fully_watered_reward ?? []))) {
       if (reward.resource === RESOURCES.CITIZEN_CARD || reward.resource === 'citizen_card') {
         // Citizen card grants are handled as pendingEffects — the engine adds the card to tableau
         update.pendingEffects.push({
@@ -594,7 +619,7 @@ export function resolveIncomePhase(state, playerId, boardTemplate, modifiers = [
           message:  `${workingPlayer.name} earns a ${reward.citizen_type} citizen card from ${projectDef.id}`,
         });
       } else {
-        const isMoney = reward.resource === RESOURCES.MONEY || reward.resource === 'money';
+        const isMoney = reward.resource === RESOURCES.MONEY || reward.resource === RESOURCES.INCOME;
         const mult    = (doubleMoney && isMoney && reward.amount > 0) ? 2 : 1;
         applyU(applyResourceDelta(
           workingState(), playerId, reward.resource, reward.amount * mult,
@@ -998,12 +1023,19 @@ function resolveTextDrivenEffect(state, playerId, cardId, side, action, options)
 
     case 'firefighter_a':
       if (side === 'C') {
-        // Count firefighters in tableau, grant 1 VP each (instead of standard firefighting reward)
-        const firefighterCount = state.players[playerId].tableau
-          .filter(c => state.cardIndex[c.cardId]?.type === CARD_TYPES.CITIZEN &&
-                       state.cardIndex[c.cardId]?.name?.toLowerCase().includes('firefighter'))
-          .length;
-        return applyResourceDelta(state, playerId, RESOURCES.VP, firefighterCount, 'Firefighter A: 1 VP per firefighter');
+        // Applies at End Step: a fully-watered firefighting project then pays
+        // 1 VP per Firefighter instead of its usual bonus (see resolveIncomePhase).
+        // Registering it twice in a round has no extra effect.
+        return {
+          ...emptyUpdate(),
+          pendingEffects: [{
+            type:    'register_income_modifier',
+            subtype: 'firefighter_a_vp',
+            playerId,
+            message: `${state.players[playerId].name} activates Firefighter A: a fully watered `
+                   + `firefighting project scores 1 VP per Firefighter this round`,
+          }],
+        };
       }
       break;
 
@@ -1032,7 +1064,7 @@ export function commitWaterBribe(state, playerId, targetPlayerId) {
 
   // Receiver pays what they can, up to $3 — the giver cannot mint money the
   // receiver doesn't have.
-  const payment = Math.min(3, receiver.moneyTrack.value);
+  const payment = Math.min(3, receiver.cash ?? 0);
 
   // Giver loses 1 water, receiver gets it
   const giveWater   = applyResourceDelta(state, playerId,      RESOURCES.WATER, -1, 'Water Bribe given');

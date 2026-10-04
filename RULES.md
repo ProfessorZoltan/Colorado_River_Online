@@ -17,7 +17,7 @@
 
 ## 2. Factions & Starting Values
 
-| Faction | Type | ◈ Water Rights | $ Money | ★ PR |
+| Faction | Type | ◈ Water Rights | $ Income | ★ PR |
 |---|---|---|---|---|
 | Arizona | State | 4 | 3 | 2 |
 | California | State | 5 | 3 | 0 |
@@ -35,7 +35,8 @@
 | ◈ | Water Rights track | Track position 3–22. Income source. VP milestones. |
 | ◈ token | Water Claims | Per-round spendable tokens = current Water Rights value. Distinct from the track. Zeroed at End Step. |
 | 💧 | Water Cubes | Physical cubes. Used for SC influence, Water Bank, Water Bribe. Not the same as Water Claims. |
-| $ | Money track | Position 0–19. Income each round = track value. |
+| $ | Income track ("money track") | Position 0–19. Pays this much cash every Round Setup. VP milestone at 19. |
+| $ | Cash | Money in hand. Unspent cash is kept across rounds; no cap. All costs are paid from cash. |
 | ★ | PR track | Position −8 to +11. Hard cap at +11. Free-lawyer thresholds at −7 and +8. |
 | VP | Victory Points | Accumulated; never decrease. Counted at game end. |
 | SC Influence | | Placed per active case. Resets after case resolves. |
@@ -48,7 +49,7 @@
 ### Phase 1 — ROUND SETUP (auto-resolves, no player input)
 1. Pass the 1st-player marker clockwise (wraps around).
 2. Each player gains **Water Claims = their current Water Rights track value**.
-3. Each player gains **Money = their current Money track value** (capped at track max 19).
+3. Each player gains **cash = their current Income track value**. The income track itself does not move.
 
 ### Phase 2 — NEGOTIATE (consecutive-pass phase)
 - Active player starts at the 1st-player marker holder.
@@ -58,9 +59,11 @@
   - Buy a **Partnership** (pay cost, mark it owned permanently).
   - Acquire a **Lawyer** from the market (standard: printed cost + $4 surcharge).
   - **Pass.**
-- FREE actions (do not consume the turn, usable any time during an action
-  phase): partnership abilities (incl. Law Firm / Business acquisitions),
-  Water Bank operations, placing SC influence with water cubes.
+- FREE actions (do not consume the turn): partnership abilities (incl. Law
+  Firm / Business acquisitions), Water Bank operations, placing SC influence
+  with water cubes. Free actions are taken **on your own turn only**, and each
+  one **at most once per turn** (e.g. Investment once per turn); they can be
+  used again on later turns in the same round. Tracked in `gameState.turnUsage`.
 - Taking any TURN action resets `consecutivePasses` to 0 and the engine
   advances to the next player automatically (deferred while a choice modal
   is open). There is no separate "End Turn" step.
@@ -98,11 +101,15 @@
 - Increases: card effects, SC win reward.
 - Decreases: End Step penalty (leftover claims or partial project, round 3+), SC loss penalty, some card effects.
 
-### Money Track
-- Range: 0–19.
-- **VP milestone**: reach 19→+5VP.
-- Income each round = current track value (added at Round Setup).
-- Spending: lawyer acquisition (cost + $4 surcharge), partnership buys, card ability payments.
+### Income Track (the "money track") and Cash
+- Income track range: 0–19. Starts at the faction's $ value.
+- **VP milestone**: income track reaches 19 → +5 VP.
+- Each Round Setup pays **cash = income track value**. Cash is kept across
+  rounds (`player.cash`, starts at 0, no cap, never below 0).
+- **Raising income:** fully-watered income projects (Factory/Vineyard/Recreation)
+  raise the income track by their printed $ amount.
+- **Cash effects:** every card "$" gain/payment, SC loss penalty (−$2), Water
+  Bribe, lawyer/activist/partnership costs, bank fees.
 
 ### PR Track
 - Range: −8 to +11. **Hard cap at +11** (cannot exceed).
@@ -142,7 +149,7 @@
 - `cost: "exhaust"` on an action = card must be in READY state to use; becomes EXHAUSTED after.
 - Exhaustion targets a specific card **instance** — owning two copies of a
   citizen card exhausts them independently.
-- Rider of Coat-tails has `cost: null` — does NOT exhaust when used.
+- Rider of Coat-tails exhausts like every other lawyer (once per round).
 - EXHAUSTED cards reset to READY at End Step cleanup.
 - LOCKED cards (Red Herring / negate target) cannot be used for the rest of
   the round; they unlock at that round's End Step.
@@ -168,7 +175,7 @@
 | its_a_job_lawyer | $2 | — | Pay $2 → +1 Water Rights | Pay $1 → +1 SC influence |
 | team_player | $3 | — | Pay $1 → gain 1💧 | Next lawyer acquired this round costs $3 less |
 | workaholic | $1 | — | (none) | Next time you would gain 1💧, gain 2 instead (one-time flag) |
-| rider_of_coattails | $1 | — | Copy N-bonus of any own lawyer activated this phase (must cost more) | Claim winner reward of any SC case resolved this round (not a party) |
+| rider_of_coattails | $1 | — | Copy N-bonus of any own lawyer activated this phase (must cost more) | Claim winner reward of any SC case **won** this round (not tied; you were not a party) |
 | in_it_for_glory | $2 | PR ≤ 7 | (none) **passive**: +1VP each SC win | +1 SC influence |
 
 **anti_environmentalist C** has `alternatives`: primary = 2 SC influence (with PR cost), alternative = gain $2 (no PR cost). Player must choose.
@@ -195,9 +202,17 @@
 | farmer_a | 4 | — | +1 PR | Fully-watered farms produce +2 extra VP this round |
 | service_worker_a | 2 | PR ≤ 4 | +$1 | One fully-watered income project doubles its bonus this round |
 | service_worker_b | 1 | PR ≤ 0 | +1 PR | Add a Protest card to the Event deck |
-| firefighter_a | — | — | (none) | Gain 1VP per Firefighter in tableau (replaces normal project reward) |
+| firefighter_a | — | — | (none) | This round, a fully-watered Firefighting project scores 1 VP per Firefighter in your tableau **instead of** its usual +1 PR and Firefighter card. Using several copies in a round has no extra effect. |
 
 Citizen cards are gained as rewards for completing Citizen Projects (Farm, Housing, Firefighting).
+
+**Finite supply:** 6 Farmer A, 6 Service Worker A, 6 Service Worker B, 10 Firefighter A
+(`CITIZEN_SUPPLY` in constants.js). Each project draws from its own shuffled pile
+(Housing's pile mixes Service Worker A and B, so you get one at random). When a
+pile is empty the project still pays its PR but grants no card.
+
+Farmer A / Service Worker A / Firefighter A C-actions register a modifier that
+applies at that round's End Step only, once per player.
 
 ---
 
@@ -262,9 +277,9 @@ Each player board has 6 project spaces. Fill all slots with water cubes → proj
 | farm | Citizen | 6 | +4 PR + Farmer citizen card |
 | housing | Citizen | 4 | +2 PR + Service Worker citizen card |
 | firefighting | Citizen | 2 | +1 PR + Firefighter citizen card |
-| factory | Income | 6 | +$5 and −3 PR |
-| vineyard | Income | 4 | +$3 and −2 PR |
-| recreation | Income | 2 | +$1 and −1 PR |
+| factory | Income | 6 | +5 Income track and −3 PR |
+| vineyard | Income | 4 | +3 Income track and −2 PR |
+| recreation | Income | 2 | +1 Income track and −1 PR |
 
 **After paying out, a project's `watered` counter resets to 0** (water returns to supply implicitly).
 
@@ -278,7 +293,7 @@ Owned permanently once bought. Can be used at any point during an action phase.
 |---|---|---|
 | law_firm | $4 | Acquire 1 Lawyer from market for a flat $4 (no printed cost, no surcharge). FREE action; the fee is charged when the lawyer is taken, and the flow can be cancelled at no cost. |
 | business | $3 | Acquire 1 Activist from market for $3 (required to acquire Activists at all). Same free-action flow. |
-| investment | $2 | Pay $2 → +1 PR immediately (free action) |
+| investment | $2 | Pay $2 → +1 PR immediately (free action, once per turn) |
 
 Team Player's "next lawyer costs $3 less" discount applies to either
 acquisition path.
@@ -289,6 +304,7 @@ acquisition path.
 
 - Pay **$8 once** to permanently unlock (capacity: 9 cubes).
 - **Deposit**: ANY player may pay the owner $1 per cube to store cubes (stored in owner's colour).
+  The owner may also store their own cubes, **free — but earns no income** from it.
 - **Withdraw**: owner retrieves any stored cubes for free, any future turn including later rounds.
 
 ---
@@ -315,7 +331,7 @@ After Round 10 End Step completes:
 
 1. Sum accumulated VP counter (milestones, SC wins, passives).
 2. Add VP from Citizens and Activists still in tableau.
-3. **Tiebreaker order**: most Water Rights → most Money → most PR → most 💧 Water Cubes.
+3. **Tiebreaker order**: most Water Rights → most cash → most PR → most 💧 Water Cubes.
 
 ---
 
@@ -381,7 +397,8 @@ actions are blocked while any exists.
 ```js
 {
   waterClaimTrack: { value, min:3, max:22, vp_milestones, milestonesTriggered },
-  moneyTrack:      { value, min:0, max:19, vp_milestones },
+  moneyTrack:      { value, min:0, max:19, vp_milestones },  // INCOME track
+  cash:            number,   // money in hand; all costs are paid from cash
   prTrack:         { value, min:-8, max:11, hard_cap:true },
   vp:              number,
   waterCubes:      number,   // physical cubes (SC, bank, bribe)

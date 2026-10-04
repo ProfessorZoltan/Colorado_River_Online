@@ -490,7 +490,7 @@
     "passive": null,
     "actions": {
       "N": {
-        "cost": null,
+        "cost": "exhaust",
         "payment": null,
         "icon": null,
         "project_type": null,
@@ -499,7 +499,7 @@
         "penalty": null
       },
       "C": {
-        "cost": null,
+        "cost": "exhaust",
         "payment": null,
         "icon": null,
         "project_type": null,

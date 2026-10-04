@@ -64,31 +64,27 @@ function enterRoundSetupPhase(state) {
     : (state.firstPlayerIndex + 1) % state.playerOrder.length;
 
   // Each player gains waterClaims = waterClaimTrack.value
-  //              gains money      = moneyTrack.value
+  //              gains cash        = income track (moneyTrack) value.
+  // The income track itself does not move; unspent cash carries over.
   const playerPatches  = {};
   const pendingEffects = [];
   for (const pid of state.playerOrder) {
     const p            = state.players[pid];
     const claimsGained = p.waterClaimTrack.value;
     const moneyGained  = p.moneyTrack.value;
-
-    // Route money income through applyTrackDelta so the $19 milestone
-    // (+5 VP) fires from income, not just from card effects.
-    const { playerPatch: moneyPatch, logEntries: moneyLogs, pendingEffects: moneyFx } =
-      applyTrackDelta(p, 'money', moneyGained, 'round income');
+    const newCash      = (p.cash ?? 0) + moneyGained;
 
     playerPatches[pid] = {
       waterClaims: claimsGained,
-      ...moneyPatch,
+      cash:        newCash,
     };
-    pendingEffects.push(...moneyFx);
 
-    logEntries.push(...moneyLogs, {
+    logEntries.push({
       type:    'round_setup_income',
       playerId: pid,
       waterClaims: claimsGained,
       money:       moneyGained,
-      message: `${p.name} gains ${claimsGained} water claims and $${moneyGained}`,
+      message: `${p.name} gains ${claimsGained} water claims and $${moneyGained} income (cash $${newCash})`,
     });
   }
 
