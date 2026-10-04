@@ -56,21 +56,27 @@ function enterRoundSetupPhase(state) {
     message: `Round ${state.round} — Round Setup`,
   }];
 
-  // Rotate first-player marker clockwise
-  const nextFirstIdx = (state.firstPlayerIndex + 1) % state.playerOrder.length;
+  // Rotate first-player marker clockwise — but NOT on the very first round:
+  // the configured first player should actually start round 1.
+  const isGameStart  = state.phase === 'setup_complete';
+  const nextFirstIdx = isGameStart
+    ? state.firstPlayerIndex
+    : (state.firstPlayerIndex + 1) % state.playerOrder.length;
 
   // Each player gains waterClaims = waterClaimTrack.value
-  //              gains money      = moneyTrack.value
-  const playerPatches = {};
+  //              gains cash        = income track (moneyTrack) value.
+  // The income track itself does not move; unspent cash carries over.
+  const playerPatches  = {};
+  const pendingEffects = [];
   for (const pid of state.playerOrder) {
     const p            = state.players[pid];
     const claimsGained = p.waterClaimTrack.value;
     const moneyGained  = p.moneyTrack.value;
-    const newMoney     = Math.min(p.moneyTrack.value + moneyGained, p.moneyTrack.max ?? 19);
+    const newCash      = (p.cash ?? 0) + moneyGained;
 
     playerPatches[pid] = {
       waterClaims: claimsGained,
-      moneyTrack:  { ...p.moneyTrack, value: newMoney },
+      cash:        newCash,
     };
 
     logEntries.push({
@@ -78,22 +84,24 @@ function enterRoundSetupPhase(state) {
       playerId: pid,
       waterClaims: claimsGained,
       money:       moneyGained,
-      message: `${p.name} gains ${claimsGained} water claims and $${moneyGained}`,
+      message: `${p.name} gains ${claimsGained} water claims and $${moneyGained} income (cash $${newCash})`,
     });
   }
 
-  logEntries.push({
-    type:    'first_player_rotated',
-    round:   state.round,
-    newFirstPlayerId: state.playerOrder[nextFirstIdx],
-    message: `${state.players[state.playerOrder[nextFirstIdx]].name} receives the 1st-player marker`,
-  });
+  if (!isGameStart) {
+    logEntries.push({
+      type:    'first_player_rotated',
+      round:   state.round,
+      newFirstPlayerId: state.playerOrder[nextFirstIdx],
+      message: `${state.players[state.playerOrder[nextFirstIdx]].name} receives the 1st-player marker`,
+    });
+  }
 
   return {
     playerPatches,
     sharedPatches: {},
     logEntries,
-    pendingEffects: [],
+    pendingEffects,
     _nextFirstPlayerIndex: nextFirstIdx,
   };
 }
@@ -145,23 +153,25 @@ function enterConsumePhase(state, rollFn) {
   }
 
   // ── Place water supply ───────────────────────────────────────────────────
-  // Sum all players' waterClaimTrack values, modified by drought/snow-melt
+  // Base = sum of all players' waterClaimTrack values.
+  // Drought/snow-melt events emit a waterSupplyDelta modifier (they used to
+  // overwrite the supply before the base was computed, zeroing the river).
   const baseSupply = state.playerOrder.reduce(
     (sum, pid) => sum + state.players[pid].waterClaimTrack.value, 0
   );
-  // Drought/snow-melt patches may have already been applied to sharedBoard
-  // by resolveEventPhase above. If waterSupply was set there, use it.
-  const eventSupply = update.sharedPatches?.waterSupply;
-  const waterSupply = eventSupply != null ? eventSupply : baseSupply;
+  const eventDelta  = update.sharedPatches?.waterSupplyDelta ?? 0;
+  const waterSupply = Math.max(0, baseSupply + eventDelta);
 
   update = mergeUpdates(update, {
     ...emptyUpdate(),
-    sharedPatches: { waterSupply },
+    sharedPatches: { waterSupply, waterSupplyDelta: 0 },
     logEntries: [{
       type:    'water_placed',
       round:   state.round,
       waterSupply,
-      message: `Water placed in river: ${waterSupply} (sum of water rights${eventSupply != null ? ', modified by event' : ''})`,
+      message: `Water placed in river: ${waterSupply} `
+             + `(${baseSupply} from water rights${eventDelta !== 0
+                 ? `, ${eventDelta > 0 ? '+' : ''}${eventDelta} from event` : ''})`,
     }],
   });
 
@@ -267,23 +277,25 @@ function enterEndStepPhase(state, boardTemplate) {
   });
 
   // ── 4. Reset exhausted cards; check discard conditions ───────────────────
+  // LOCKED cards (Red Herring / negate) were locked during THIS round and the
+  // card text says "cannot be used this round" — so every End Step unlocks
+  // everything. (The old lockedRound === state.round comparison could never
+  // be true on a later round, locking cards permanently.)
   const tableauPatches = {};
   for (const pid of state.playerOrder) {
     const player = state.players[pid];
 
-    const resetTableau = player.tableau.map(c => {
-      if (c.exhaustState === EXHAUST_STATES.LOCKED) {
-        if (c.lockedRound === state.round) {
-          return { ...c, exhaustState: EXHAUST_STATES.READY, lockedRound: undefined };
-        }
-        return { ...c, lockedRound: c.lockedRound ?? state.round };
-      }
-      return { ...c, exhaustState: EXHAUST_STATES.READY };
-    });
+    const resetTableau = player.tableau.map(c => ({
+      ...c, exhaustState: EXHAUST_STATES.READY, lockedRound: undefined,
+    }));
 
-    // Check discard conditions on the reset tableau
-    const resetPlayer = { ...player, tableau: resetTableau,
-      ...(update.playerPatches?.[pid] ?? {}) };
+    // Discard check runs against POST-income tracks (patches first, then our
+    // reset tableau so patches can't resurrect a pre-income tableau).
+    const resetPlayer = {
+      ...player,
+      ...(update.playerPatches?.[pid] ?? {}),
+      tableau: resetTableau,
+    };
     const { cardsToDiscard, logEntries: discardLogs } =
       checkDiscardConditions(resetPlayer, state.cardIndex);
 

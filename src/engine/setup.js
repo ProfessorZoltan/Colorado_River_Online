@@ -22,6 +22,7 @@ import {
   EXHAUST_STATES,
   MARKET_SIZES,
   STRATEGY_DEAL,
+  CITIZEN_SUPPLY,
 } from './constants.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,6 +168,7 @@ function buildPlayerState(playerConfig, factionDef, boardTemplate) {
     prTrack:         buildTrack(tracks.pr,           sv.pr_track),
 
     vp:               0,
+    cash:             0,  // Money in hand; the money track is INCOME, paid out as cash each Round Setup
     waterCubes:       0,  // Physical water cubes (SC influence, water bank, bribe)
     waterClaims:      0,  // Per-round claim tokens — set at Round Setup, spent in Consume
     protestInfluence: 0,
@@ -241,12 +243,30 @@ export function buildInitialState(playerConfigs, cards, playerBoardSchema, share
   let strategyDeck     = shuffle(allStrategyIds);
   let strategyDiscard  = [];
 
-  // Deal STRATEGY_DEAL cards to each player
+  // The full deal (3 each) exceeds the 8-card deck for 3+ players.
+  // Scale the deal so every player gets the same number of cards:
+  //   2p → 3 each, 3–4p → 2 each, 5–6p → 1 each.
+  const dealCount = Math.min(
+    STRATEGY_DEAL,
+    Math.floor(allStrategyIds.length / playerOrder.length)
+  );
   for (const playerId of playerOrder) {
-    const { drawn, remaining } = drawFrom(strategyDeck, STRATEGY_DEAL);
+    const { drawn, remaining } = drawFrom(strategyDeck, dealCount);
     players[playerId].hand = drawn; // Strategy cards held as raw card IDs in hand
     strategyDeck = remaining;
   }
+
+  // ── Citizen supply (finite piles keyed by project citizen_type) ───────────
+  // Each pile is shuffled once at setup; Housing's pile mixes A and B.
+  const citizenSupply = {};
+  for (const [cardId, copies] of Object.entries(CITIZEN_SUPPLY)) {
+    const card = cards.find(c => c.id === cardId);
+    if (!card) continue;
+    const typeKey = card.name.toLowerCase().replace(/\s+[a-z]$/, '').replace(/\s+/g, '_');
+    citizenSupply[typeKey] = [...(citizenSupply[typeKey] ?? []),
+      ...Array.from({ length: copies }, () => cardId)];
+  }
+  for (const k of Object.keys(citizenSupply)) citizenSupply[k] = shuffle(citizenSupply[k]);
 
   // ── Event deck ────────────────────────────────────────────────────────────
   const eventIds = expandComposition(EVENT_DECK_COMPOSITION);
@@ -291,6 +311,7 @@ export function buildInitialState(playerConfigs, cards, playerBoardSchema, share
       eventDeck,
       activeEvent:  null,
       docket:       docketCaseIds,
+      citizenSupply,
       waterSupply:  0,   // Determined at start of WATER phase
       casesResolvedThisRound: [], // [{caseId, winnerId}] — cleared each cleanup
     },

@@ -19,6 +19,7 @@ import {
   applyTrackDelta,
   grantVP,
   applyWaterCubeDelta,
+  applyCashDelta,
   checkDiscardConditions,
   lawyerAcquisitionCost,
   canAcquireWithPr,
@@ -80,10 +81,12 @@ function playerUpdate(playerId, patch, log = [], effects = []) {
 // Maps a resource string from cards.json to the correct track key
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 'money' is cash in hand (see applyCashDelta); the money TRACK is the income
+// track, addressed by the 'income' resource.
 const RESOURCE_TO_TRACK = {
   [RESOURCES.WATER_CLAIM]:       'water_claim',
   [RESOURCES.WATER_CLAIM_TRACK]: 'water_claim',
-  [RESOURCES.MONEY]:             'money',
+  [RESOURCES.INCOME]:            'money',
   [RESOURCES.PR]:                'pr',
 };
 
@@ -113,24 +116,18 @@ function applyResourceDelta(state, playerId, resource, amount, reason) {
     return playerUpdate(playerId, playerPatch, logEntries);
   }
 
+  if (resource === RESOURCES.MONEY) {
+    const { playerPatch, logEntries } = applyCashDelta(player, amount, reason);
+    return playerUpdate(playerId, playerPatch, logEntries);
+  }
+
   const trackKey = RESOURCE_TO_TRACK[resource];
   if (trackKey) {
+    // NOTE: discard-condition checks happen ONLY at End Step (RULES §4 step 5),
+    // not on every mid-round track change.
     const { playerPatch, logEntries, pendingEffects } =
       applyTrackDelta(player, trackKey, amount, reason);
-    // After any track change, check discard conditions on tableau
-    const { cardsToDiscard, logEntries: discardLogs } =
-      checkDiscardConditions({ ...player, ...playerPatch }, state.cardIndex);
-
-    const discardPatch = cardsToDiscard.length > 0
-      ? { tableau: player.tableau.filter(c => !cardsToDiscard.includes(c.instanceId)) }
-      : {};
-
-    return playerUpdate(
-      playerId,
-      { ...playerPatch, ...discardPatch },
-      [...logEntries, ...discardLogs],
-      pendingEffects
-    );
+    return playerUpdate(playerId, playerPatch, logEntries, pendingEffects);
   }
 
   console.warn(`effectResolver: unknown resource "${resource}" — skipped`);
@@ -148,27 +145,36 @@ function applyResourceDelta(state, playerId, resource, amount, reason) {
 function applyPayments(state, playerId, payments) {
   if (!payments || payments.length === 0) return { ok: true, update: emptyUpdate() };
 
-  const player = state.players[playerId];
-  let update   = emptyUpdate();
+  let workingPlayer = state.players[playerId];
+  let update        = emptyUpdate();
 
   for (const p of payments) {
     const amount = -Math.abs(p.amount); // Payments are always negative deltas
 
-    // Validate affordability
+    // ── Affordability: a cost you cannot fully pay rejects the action ──────
     const trackKey = RESOURCE_TO_TRACK[p.resource];
-    if (trackKey) {
+    if (p.resource === RESOURCES.MONEY) {
+      if ((workingPlayer.cash ?? 0) < Math.abs(p.amount)) {
+        return { ok: false, update: null, error: `Insufficient cash to pay cost` };
+      }
+    } else if (trackKey) {
       const trackStateKey = { water_claim: 'waterClaimTrack', money: 'moneyTrack', pr: 'prTrack' }[trackKey];
-      const current = player[trackStateKey]?.value ?? 0;
-      const min     = player[trackStateKey]?.min   ?? 0;
-      if (current + amount < min && player[trackStateKey]?.hard_cap) {
+      const current = workingPlayer[trackStateKey]?.value ?? 0;
+      const min     = workingPlayer[trackStateKey]?.min   ?? 0;
+      if (current + amount < min) {
         return { ok: false, update: null, error: `Insufficient ${p.resource} to pay cost` };
+      }
+    } else if (p.resource === RESOURCES.WATER || p.resource === 'water') {
+      if ((workingPlayer.waterCubes ?? 0) < Math.abs(p.amount)) {
+        return { ok: false, update: null, error: `Insufficient water cubes to pay cost` };
       }
     }
 
-    const costUpdate = applyResourceDelta(state, playerId, p.resource, amount, 'payment');
-    update = mergeUpdates(update, costUpdate);
-    // Apply patch to check subsequent payments against updated state
-    // (shallow apply for validation — the real commit happens in gameStore)
+    const workingState = { ...state, players: { ...state.players, [playerId]: workingPlayer } };
+    const costUpdate   = applyResourceDelta(workingState, playerId, p.resource, amount, 'payment');
+    update             = mergeUpdates(update, costUpdate);
+    const patch        = costUpdate.playerPatches?.[playerId];
+    if (patch) workingPlayer = { ...workingPlayer, ...patch };
   }
 
   return { ok: true, update, error: null };
@@ -190,9 +196,11 @@ function resolveScInfluence(state, playerId, amount, caseId = null) {
     };
   }
 
+  // Influence amounts must be numbers — string amounts corrupt totals via concatenation
+  const numAmount = Number(amount) || 0;
   const player    = state.players[playerId];
-  const current   = player.scInfluence[targetCase] ?? 0;
-  const newVal    = current + amount;
+  const current   = Number(player.scInfluence[targetCase]) || 0;
+  const newVal    = current + numAmount;
   const newInfluence = { ...player.scInfluence, [targetCase]: newVal };
 
   return playerUpdate(
@@ -237,11 +245,13 @@ function resolveDrawStrategy(state, playerId, amount = 1) {
   const { strategyDeck, strategyDiscard } = state.sharedBoard;
   let deck    = [...strategyDeck];
   let discard = [...strategyDiscard];
+  let didReshuffle = false;
 
   // Reshuffle discard into deck if we don't have enough cards
   if (deck.length < amount && discard.length > 0) {
-    deck    = reshuffleDiscard(discard);
+    deck    = [...deck, ...reshuffleDiscard(discard)];
     discard = [];
+    didReshuffle = true;
   }
 
   // After reshuffle attempt, if still empty → effect does nothing
@@ -258,7 +268,6 @@ function resolveDrawStrategy(state, playerId, amount = 1) {
 
   const { drawn, remaining } = drawFrom(deck, Math.min(amount, deck.length));
   const player = state.players[playerId];
-  const didReshuffle = discard !== state.sharedBoard.strategyDiscard; // reshuffle happened
 
   return mergeUpdates(
     playerUpdate(
@@ -284,7 +293,12 @@ function resolveDrawStrategy(state, playerId, amount = 1) {
  * Add a protest event card to the event deck (Activist B N-action, Service Worker B C-action).
  */
 function resolveAddProtestToEventDeck(state, protestCardId = 'protest_a') {
-  const newEventDeck = [...state.sharedBoard.eventDeck, protestCardId];
+  // Insert at a random position within the remaining deck. Appending to the
+  // bottom of a 9-card cycling deck with only 6 event rounds meant the card
+  // could never be drawn.
+  const newEventDeck = [...state.sharedBoard.eventDeck];
+  const insertAt = Math.floor(Math.random() * (newEventDeck.length + 1));
+  newEventDeck.splice(insertAt, 0, protestCardId);
   return {
     playerPatches:  {},
     sharedPatches:  { eventDeck: newEventDeck },
@@ -536,35 +550,60 @@ function resolveProtectOurInterests(state, playerId) {
  * @param {Object[]} modifiers    Active modifier effects this income phase
  */
 export function resolveIncomePhase(state, playerId, boardTemplate, modifiers = []) {
-  const player  = state.players[playerId];
-  let   update  = emptyUpdate();
+  let update        = emptyUpdate();
+  // Thread a working copy of the player through every applied delta so that
+  // multiple project rewards in one End Step stack instead of overwriting
+  // each other (last-writer-wins patch collisions lost rewards AND left
+  // earlier projects un-reset, paying out forever).
+  let workingPlayer = state.players[playerId];
+
+  const workingState = () => ({
+    ...state,
+    players: { ...state.players, [playerId]: workingPlayer },
+  });
+  const applyU = (u) => {
+    update = mergeUpdates(update, u);
+    const patch = u.playerPatches?.[playerId];
+    if (patch) workingPlayer = { ...workingPlayer, ...patch };
+  };
+
+  // Only this player's registered modifiers apply to this player's projects
+  const myMods    = modifiers.filter(m => m.playerId === playerId);
+  const farmerMod = myMods.find(m => m.subtype === 'farmer_a_farm_vp');
+  let   swaMod    = myMods.find(m => m.subtype === 'service_worker_a_income_double');
+  const fireMod   = myMods.find(m => m.subtype === 'firefighter_a_vp');
+
   const allProjects = [
     ...boardTemplate.citizen_projects,
     ...boardTemplate.income_projects,
   ];
 
   for (const projectDef of allProjects) {
-    const projectType = allProjects.some(p => p === projectDef && p.citizen_type)
-      ? 'citizen' : 'income';
-    const actualType   = projectDef.citizen_type ? 'citizen' : 'income';
-    const playerProject = player.projects[actualType][projectDef.id];
+    const actualType    = projectDef.citizen_type ? 'citizen' : 'income';
+    const playerProject = workingPlayer.projects[actualType][projectDef.id];
 
     if (!playerProject) continue;
-    const isFullyWatered = playerProject.watered >= projectDef.water_slots;
-    if (!isFullyWatered) continue;
+    if (playerProject.watered < projectDef.water_slots) continue;
 
-    for (const reward of (projectDef.fully_watered_reward ?? [])) {
-      // Check for Farmer A modifier (+2 VP on fully watered farms)
-      if (reward.resource === RESOURCES.VP || reward.resource === 'vp') {
-        let vpAmount = reward.amount;
-        const farmerAMod = modifiers.find(m => m.subtype === 'farmer_a_farm_vp' && projectDef.project_type === 'farm');
-        if (farmerAMod) vpAmount += 2;
+    // Service Worker A: the first fully-watered income project doubles its
+    // income/money bonus this round (one project only).
+    const doubleMoney = !!swaMod && actualType === 'income';
+    if (doubleMoney) swaMod = null;
 
-        const swaMod = modifiers.find(m => m.subtype === 'service_worker_a_income_double' && actualType === 'income');
-        if (swaMod) vpAmount *= 2;
+    // Firefighter A: a fully-watered firefighting project pays 1 VP per
+    // Firefighter in tableau INSTEAD of its usual bonus (PR + citizen card).
+    const firefighterSwap = !!fireMod && projectDef.id === 'firefighting';
+    if (firefighterSwap) {
+      const firefighters = workingPlayer.tableau
+        .filter(c => c.cardId === 'firefighter_a').length;
+      applyU(applyResourceDelta(
+        workingState(), playerId, RESOURCES.VP, firefighters,
+        `Firefighter A: ${firefighters} Firefighter(s) instead of the firefighting bonus`
+      ));
+    }
 
-        update = mergeUpdates(update, applyResourceDelta(state, playerId, 'vp', vpAmount, `${projectDef.id} fully watered`));
-      } else if (reward.resource === RESOURCES.CITIZEN_CARD || reward.resource === 'citizen_card') {
+    for (const reward of (firefighterSwap ? [] : (projectDef.fully_watered_reward ?? []))) {
+      if (reward.resource === RESOURCES.CITIZEN_CARD || reward.resource === 'citizen_card') {
         // Citizen card grants are handled as pendingEffects — the engine adds the card to tableau
         update.pendingEffects.push({
           type:         'grant_citizen_card',
@@ -577,33 +616,35 @@ export function resolveIncomePhase(state, playerId, boardTemplate, modifiers = [
           type:     'citizen_card_reward',
           playerId,
           citizen_type: reward.citizen_type,
-          message:  `${player.name} earns a ${reward.citizen_type} citizen card from ${projectDef.id}`,
+          message:  `${workingPlayer.name} earns a ${reward.citizen_type} citizen card from ${projectDef.id}`,
         });
       } else {
-        update = mergeUpdates(
-          update,
-          applyResourceDelta(state, playerId, reward.resource, reward.amount, `${projectDef.id} fully watered`)
-        );
+        const isMoney = reward.resource === RESOURCES.MONEY || reward.resource === RESOURCES.INCOME;
+        const mult    = (doubleMoney && isMoney && reward.amount > 0) ? 2 : 1;
+        applyU(applyResourceDelta(
+          workingState(), playerId, reward.resource, reward.amount * mult,
+          `${projectDef.id} fully watered${mult > 1 ? ' (Service Worker A: doubled)' : ''}`
+        ));
       }
     }
 
+    // Farmer A: fully-watered farms produce +2 extra VP this round
+    if (farmerMod && projectDef.id === 'farm') {
+      applyU(applyResourceDelta(
+        workingState(), playerId, RESOURCES.VP, 2, 'Farmer A: fully watered farm bonus'
+      ));
+    }
+
     // Reset water after income (cubes return to supply)
-    update = mergeUpdates(update, {
-      playerPatches: {
-        [playerId]: {
-          projects: {
-            ...player.projects,
-            [actualType]: {
-              ...player.projects[actualType],
-              [projectDef.id]: { ...playerProject, watered: 0 },
-            },
-          },
+    applyU(playerUpdate(playerId, {
+      projects: {
+        ...workingPlayer.projects,
+        [actualType]: {
+          ...workingPlayer.projects[actualType],
+          [projectDef.id]: { ...playerProject, watered: 0 },
         },
       },
-      sharedPatches: {},
-      logEntries: [],
-      pendingEffects: [],
-    });
+    }));
   }
 
   return update;
@@ -614,14 +655,42 @@ export function resolveIncomePhase(state, playerId, boardTemplate, modifiers = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Cards whose listed side MUST resolve through resolveTextDrivenEffect,
+ * regardless of their display icon. The icon field on these actions is
+ * for UI display only — routing by icon gave them generic wrong effects.
+ */
+const TEXT_HANDLER_SIDES = {
+  activist_b:                   'N',
+  activist_c:                   'C',
+  activist_d:                   'N',
+  sneaky_pete:                  'C',
+  team_player:                  'C',
+  workaholic:                   'C',
+  rider_of_coattails:           'NC',
+  in_it_for_glory:              'C',
+  deal_with_federal_government: 'N',
+  quid_pro_quo:                 'N',
+  lobby_federal_government:     'N',
+  scorched_earth_negotiating:   'N',
+  water_bribe:                  'C',
+  red_herring_case:             'N',
+  donate_to_sc_justice:         'N',
+  protect_our_interests:        'N',
+  service_worker_b:             'C',
+  farmer_a:                     'C',
+  service_worker_a:             'C',
+  firefighter_a:                'C',
+};
+
+/**
  * Resolve a card action (N or C side) for a player.
  *
  * @param {Object} state         Current GameState
  * @param {string} playerId      Acting player
  * @param {string} cardId        cards.json id
  * @param {'N'|'C'} side         Which action side
- * @param {Object} [options]     Extra options (e.g. chosen targets)
- * @returns {StateUpdate}
+ * @param {Object} [options]     Extra options (e.g. chosen targets, instanceId)
+ * @returns {StateUpdate}        May carry `_failed: true` when nothing resolved
  */
 export function resolveCardAction(state, playerId, cardId, side, options = {}) {
   const cardDef = state.cardIndex[cardId];
@@ -632,36 +701,15 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
     return {
       ...emptyUpdate(),
       logEntries: [{ type: 'warn', message: `Card ${cardId} has no ${side} action` }],
+      _failed: true,
     };
   }
 
-  // ── Payment first (skipped when options.skipPayment is true) ──────────────
-  const payResult = options.skipPayment
-    ? { ok: true, update: emptyUpdate() }
-    : applyPayments(state, playerId, action.payment);
-  if (!payResult.ok) {
-    return {
-      ...emptyUpdate(),
-      logEntries: [{ type: 'error', message: payResult.error }],
-    };
-  }
-
-  let update = payResult.update;
-  const player = state.players[playerId];
-
-  // ── Exhaust the card ──────────────────────────────────────────────────────
-  if (action.cost === 'exhaust') {
-    const newTableau = player.tableau.map(c =>
-      c.cardId === cardId ? { ...c, exhaustState: EXHAUST_STATES.EXHAUSTED } : c
-    );
-    update = mergeUpdates(update, playerUpdate(playerId, { tableau: newTableau }));
-  }
-
-  // ── Resolve the effect ────────────────────────────────────────────────────
-
-  // If card has alternatives and player hasn't chosen, ask before resolving.
+  // ── Alternatives: ask BEFORE paying or exhausting anything ────────────────
+  // Payment/exhaust happen on the re-dispatch once the player has chosen,
+  // using the chosen variant's own payment (a free alternative costs nothing).
   if (action.alternatives?.length > 0 && options.alternativeIdx === undefined) {
-    return mergeUpdates(update, {
+    return {
       ...emptyUpdate(),
       pendingEffects: [{
         type:         'choice_required',
@@ -669,20 +717,62 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
         playerId,
         cardId,
         side,
+        instanceId:   options.instanceId,
         primary:      { icon: action.icon, text: action.text },
         alternatives: action.alternatives,
         message: `${state.players[playerId].name} must choose an effect for ${cardDef.name} ${side}`,
       }],
-    });
+    };
   }
 
   // Route to primary or chosen alternative
   const resolvedAction = (options.alternativeIdx > 0)
     ? { ...action, ...action.alternatives[options.alternativeIdx - 1] }
     : action;
-  const resolvedIcon = resolvedAction.icon;
 
+  // ── Payment (from the resolved variant; skipped for copies e.g. Rider) ────
+  const payResult = options.skipPayment
+    ? { ok: true, update: emptyUpdate() }
+    : applyPayments(state, playerId, resolvedAction.payment);
+  if (!payResult.ok) {
+    return {
+      ...emptyUpdate(),
+      logEntries: [{ type: 'error', message: payResult.error }],
+      _failed: true,
+    };
+  }
+
+  let update = payResult.update;
+  const player = state.players[playerId];
+
+  // ── Exhaust exactly one card instance ─────────────────────────────────────
+  // options.instanceId targets a specific copy; otherwise the first READY copy.
+  if (action.cost === 'exhaust') {
+    let exhaustedOne = false;
+    const newTableau = player.tableau.map(c => {
+      if (exhaustedOne) return c;
+      const match = options.instanceId
+        ? c.instanceId === options.instanceId
+        : (c.cardId === cardId && c.exhaustState === EXHAUST_STATES.READY);
+      if (match) { exhaustedOne = true; return { ...c, exhaustState: EXHAUST_STATES.EXHAUSTED }; }
+      return c;
+    });
+    if (exhaustedOne) {
+      update = mergeUpdates(update, playerUpdate(playerId, { tableau: newTableau }));
+    }
+  }
+
+  // ── Resolve the effect ────────────────────────────────────────────────────
   let effectUpdate = emptyUpdate();
+
+  // Dedicated per-card handlers take priority over generic icon routing
+  const dedicatedSides = TEXT_HANDLER_SIDES[cardId] ?? '';
+  if (dedicatedSides.includes(side) && options.alternativeIdx === undefined) {
+    effectUpdate = resolveTextDrivenEffect(state, playerId, cardId, side, resolvedAction, options);
+    return mergeUpdates(update, effectUpdate);
+  }
+
+  const resolvedIcon = resolvedAction.icon;
 
   switch (resolvedIcon) {
     case 'water_claim':
@@ -696,13 +786,14 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
             subtype: 'activist_a_water_direction',
             playerId,
             cardId,
-            message: `${state.players[playerId].name}: Gain or Lose 1 water claim?`,
+            instanceId: options.instanceId,
+            message: `${state.players[playerId].name}: Gain or Lose 1 Water Rights?`,
           }],
         };
       } else {
         effectUpdate = applyResourceDelta(
           state, playerId, RESOURCES.WATER_CLAIM,
-          options.delta ?? 1,
+          options.delta ?? resolvedAction.amount ?? 1,
           `${cardDef.name} ${side} action`
         );
       }
@@ -711,7 +802,7 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
     case 'water_claim_track':
       effectUpdate = applyResourceDelta(
         state, playerId, RESOURCES.WATER_CLAIM,
-        options.delta ?? 1,
+        options.delta ?? resolvedAction.amount ?? 1,
         `${cardDef.name} ${side} action`
       );
       break;
@@ -719,7 +810,7 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
     case 'money':
       effectUpdate = applyResourceDelta(
         state, playerId, RESOURCES.MONEY,
-        options.amount ?? 3,
+        resolvedAction.amount ?? options.amount ?? 3,
         `${cardDef.name} ${side} action`
       );
       break;
@@ -727,7 +818,7 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
     case 'pr':
       effectUpdate = applyResourceDelta(
         state, playerId, RESOURCES.PR,
-        options.amount ?? 1,
+        resolvedAction.amount ?? options.amount ?? 1,
         `${cardDef.name} ${side} action`
       );
       break;
@@ -735,29 +826,39 @@ export function resolveCardAction(state, playerId, cardId, side, options = {}) {
     case 'water':
       effectUpdate = applyResourceDelta(
         state, playerId, RESOURCES.WATER,
-        options.amount ?? 1,
+        resolvedAction.amount ?? options.amount ?? 1,
         `${cardDef.name} ${side} action`
       );
       break;
 
-    case 'sc_influence':
-      effectUpdate = resolveScInfluence(
-        state, playerId,
-        options.amount ?? resolvedAction.text?.match(/(\d+) SC/)?.[1] ?? 1,
-        options.caseId
+    case 'vp':
+      effectUpdate = applyResourceDelta(
+        state, playerId, RESOURCES.VP,
+        resolvedAction.amount ?? options.amount ?? 1,
+        `${cardDef.name} ${side} action`
       );
       break;
+
+    case 'sc_influence': {
+      const parsed = resolvedAction.text?.match(/(\d+)\s*SC/);
+      const amt = options.amount
+        ?? resolvedAction.amount
+        ?? (parsed ? parseInt(parsed[1], 10) : 1);
+      effectUpdate = resolveScInfluence(state, playerId, amt, options.caseId);
+      break;
+    }
 
     case 'protest_influence':
       effectUpdate = resolveProtestInfluence(
         state, playerId,
-        options.amount ?? parseInt(resolvedAction.text?.match(/\+(\d+)/)?.[1] ?? '1', 10)
+        options.amount ?? resolvedAction.amount
+          ?? parseInt(resolvedAction.text?.match(/\+(\d+)/)?.[1] ?? '1', 10)
       );
       break;
 
     case null:
       // No icon — text-driven or special effect
-      effectUpdate = resolveTextDrivenEffect(state, playerId, cardId, side, action, options);
+      effectUpdate = resolveTextDrivenEffect(state, playerId, cardId, side, resolvedAction, options);
       break;
 
     default:
@@ -797,12 +898,12 @@ function resolveTextDrivenEffect(state, playerId, cardId, side, action, options)
     case 'workaholic':
       // Sets a flag on player state. The next time this player gains exactly
       // 1 water cube, applyResourceDelta checks the flag and gives 2 instead.
-      return mergeUpdates(update, playerUpdate(
+      return playerUpdate(
         playerId,
         { workaholicActive: true },
         [{ type: 'workaholic_active', playerId,
            message: `${state.players[playerId].name} activates Workaholic — next +1 water becomes +2` }]
-      ));
+      );
 
     case 'rider_of_coattails':
       // N: "Gain the bonus of any of your lawyers activated this phase, if they cost more"
@@ -922,12 +1023,19 @@ function resolveTextDrivenEffect(state, playerId, cardId, side, action, options)
 
     case 'firefighter_a':
       if (side === 'C') {
-        // Count firefighters in tableau, grant 1 VP each (instead of standard firefighting reward)
-        const firefighterCount = state.players[playerId].tableau
-          .filter(c => state.cardIndex[c.cardId]?.type === CARD_TYPES.CITIZEN &&
-                       state.cardIndex[c.cardId]?.name?.toLowerCase().includes('firefighter'))
-          .length;
-        return applyResourceDelta(state, playerId, RESOURCES.VP, firefighterCount, 'Firefighter A: 1 VP per firefighter');
+        // Applies at End Step: a fully-watered firefighting project then pays
+        // 1 VP per Firefighter instead of its usual bonus (see resolveIncomePhase).
+        // Registering it twice in a round has no extra effect.
+        return {
+          ...emptyUpdate(),
+          pendingEffects: [{
+            type:    'register_income_modifier',
+            subtype: 'firefighter_a_vp',
+            playerId,
+            message: `${state.players[playerId].name} activates Firefighter A: a fully watered `
+                   + `firefighting project scores 1 VP per Firefighter this round`,
+          }],
+        };
       }
       break;
 
@@ -946,12 +1054,24 @@ export function commitWaterBribe(state, playerId, targetPlayerId) {
   const giver    = state.players[playerId];
   const receiver = state.players[targetPlayerId];
 
+  if ((giver.waterCubes ?? 0) < 1) {
+    return {
+      ...emptyUpdate(),
+      logEntries: [{ type: 'error', playerId,
+        message: `${giver.name} has no water cube to give — Water Bribe fizzles` }],
+    };
+  }
+
+  // Receiver pays what they can, up to $3 — the giver cannot mint money the
+  // receiver doesn't have.
+  const payment = Math.min(3, receiver.cash ?? 0);
+
   // Giver loses 1 water, receiver gets it
   const giveWater   = applyResourceDelta(state, playerId,      RESOURCES.WATER, -1, 'Water Bribe given');
   const takeWater   = applyResourceDelta(state, targetPlayerId, RESOURCES.WATER, +1, 'Water Bribe received');
-  // Receiver pays $3 to giver
-  const receiverPay = applyResourceDelta(state, targetPlayerId, RESOURCES.MONEY, -3, 'Water Bribe payment');
-  const giverReceive= applyResourceDelta(state, playerId,       RESOURCES.MONEY, +3, 'Water Bribe payment received');
+  // Receiver pays the giver
+  const receiverPay = applyResourceDelta(state, targetPlayerId, RESOURCES.MONEY, -payment, 'Water Bribe payment');
+  const giverReceive= applyResourceDelta(state, playerId,       RESOURCES.MONEY, +payment, 'Water Bribe payment received');
 
   return mergeUpdates(giveWater, takeWater, receiverPay, giverReceive);
 }

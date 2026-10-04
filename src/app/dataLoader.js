@@ -38,9 +38,14 @@ function validateCards(cards) {
   if (!Array.isArray(cards)) throw new Error('cards.json: root must be an array');
 
   const counts = {};
+  const seenIds = new Set();
   for (const card of cards) {
     if (!card.id)   throw new Error(`cards.json: card missing "id" — ${JSON.stringify(card).slice(0, 60)}`);
     if (!card.type) throw new Error(`cards.json: card "${card.id}" missing "type"`);
+    if (seenIds.has(card.id)) {
+      throw new Error(`cards.json: duplicate card id "${card.id}" — the card index would silently overwrite it`);
+    }
+    seenIds.add(card.id);
     counts[card.type] = (counts[card.type] ?? 0) + 1;
   }
 
@@ -48,23 +53,41 @@ function validateCards(cards) {
     const got      = counts[type]      ?? 0;
     const expected = EXPECTED_CARD_COUNTS[type];
     if (got !== expected) {
-      console.warn(`dataLoader: expected ${expected} ${type} cards, found ${got}`);
+      throw new Error(`cards.json: expected ${expected} ${type} cards, found ${got}`);
     }
   }
 }
 
-function validatePlayerBoard(pb) {
+function validatePlayerBoard(pb, cards) {
   if (!pb.board_template) throw new Error('player_board.json: missing "board_template"');
   if (!pb.factions?.length) throw new Error('player_board.json: "factions" array is empty or missing');
 
-  const { tracks } = pb.board_template;
+  const { tracks, citizen_projects, income_projects } = pb.board_template;
   if (!tracks?.water_claim || !tracks?.money || !tracks?.pr) {
     throw new Error('player_board.json: board_template.tracks must have water_claim, money, and pr');
+  }
+  if (!Array.isArray(citizen_projects) || !Array.isArray(income_projects)) {
+    throw new Error('player_board.json: board_template must have citizen_projects and income_projects arrays');
+  }
+  for (const p of [...citizen_projects, ...income_projects]) {
+    if (!p.id || typeof p.water_slots !== 'number') {
+      throw new Error(`player_board.json: project "${p.id ?? '?'}" missing id or water_slots`);
+    }
   }
 
   for (const faction of pb.factions) {
     if (!faction.id || !faction.starting_values) {
       throw new Error(`player_board.json: faction "${faction.id ?? '?'}" missing id or starting_values`);
+    }
+  }
+
+  // Every SC case must reference known factions on both sides
+  const factionIds = new Set(pb.factions.map(f => f.id));
+  for (const card of cards) {
+    if (card.type !== 'sc_case') continue;
+    if (!factionIds.has(card.plaintiff?.id) || !factionIds.has(card.defendant?.id)) {
+      throw new Error(`cards.json: sc_case "${card.id}" references unknown faction `
+        + `(${card.plaintiff?.id} v ${card.defendant?.id})`);
     }
   }
 }
@@ -99,7 +122,7 @@ export function loadGameData() {
   if (_cache) return _cache;
 
   validateCards(cardsRaw);
-  validatePlayerBoard(playerBoardRaw);
+  validatePlayerBoard(playerBoardRaw, cardsRaw);
   validateSharedBoard(sharedBoardRaw);
 
   _cache = {

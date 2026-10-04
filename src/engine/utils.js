@@ -86,9 +86,10 @@ export function clamp(value, min, max) {
 }
 
 /**
- * Resolve a delta against a track with hard_cap enforcement.
- * If hard_cap is false, the value can exceed max (tracked but capped for display).
- * Returns the new clamped value.
+ * Resolve a delta against a track. All tracks clamp to their printed
+ * [min, max] range (RULES §5 ranges: Water Rights 3–22, Money 0–19, PR −8..+11).
+ * The hard_cap flag is retained for PR-specific semantics elsewhere but no
+ * track may exceed its printed bounds.
  * @param {number}  current
  * @param {number}  delta
  * @param {number}  min
@@ -97,9 +98,7 @@ export function clamp(value, min, max) {
  * @returns {number}
  */
 export function applyDelta(current, delta, min, max, hard_cap) {
-  const next = current + delta;
-  if (hard_cap) return clamp(next, min, max);
-  return Math.max(min, next); // Only enforce floor; ceiling is soft
+  return clamp(current + delta, min, max);
 }
 
 /**

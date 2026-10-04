@@ -154,6 +154,35 @@ export function applyTrackDelta(playerState, trackKey, delta, reason = '') {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Cash (money in hand — kept across rounds; the money TRACK is income)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Adjust a player's cash. Cash never goes below 0 and has no ceiling.
+ * @param {Object} playerState
+ * @param {number} delta
+ * @param {string} reason
+ */
+export function applyCashDelta(playerState, delta, reason = '') {
+  const from   = playerState.cash ?? 0;
+  const newVal = Math.max(0, from + delta);
+  return {
+    playerPatch:    { cash: newVal },
+    logEntries:     [{
+      type:     'cash_change',
+      playerId: playerState.id,
+      from,
+      to:       newVal,
+      delta,
+      reason,
+      message:  `${playerState.name} ${delta >= 0 ? 'gains' : 'pays'} $${Math.abs(delta)} `
+              + `(cash $${from} → $${newVal})${reason ? ': ' + reason : ''}`,
+    }],
+    pendingEffects: [],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // VP direct grant (milestones, SC cases, card passives)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -223,7 +252,8 @@ export function applyWaterCubeDelta(playerState, delta, reason = '') {
 export function checkDiscardConditions(playerState, cardIndex) {
   const resources = {
     pr:          playerState.prTrack.value,
-    money:       playerState.moneyTrack.value,
+    money:       playerState.cash ?? 0,
+    income:      playerState.moneyTrack.value,
     water_claim: playerState.waterClaimTrack.value,
   };
 
@@ -271,14 +301,25 @@ export function canAcquireWithPr(cardDef, currentPr) {
 }
 
 /**
+ * Does the player's PR waive the $4 lawyer surcharge?
+ * RULES §5: waived when PR is at or beyond −7 or +8.
+ * @param {number} currentPr
+ * @returns {boolean}
+ */
+export function prWaivesSurcharge(currentPr) {
+  const [neg, pos] = [Math.min(...PR_THRESHOLDS.FREE_LAWYER_ACQUISITION),
+                      Math.max(...PR_THRESHOLDS.FREE_LAWYER_ACQUISITION)];
+  return currentPr <= neg || currentPr >= pos;
+}
+
+/**
  * Compute the effective acquisition cost for a lawyer card.
- * Discount applies if player is at PR -7 or +8.
+ * The $4 surcharge is waived when PR is at or beyond −7 / +8 (RULES §5).
  * @param {Object} cardDef
  * @param {number} currentPr
  * @returns {number}  Total money cost
  */
 export function lawyerAcquisitionCost(cardDef, currentPr) {
   const SURCHARGE = 4;
-  const atThreshold = PR_THRESHOLDS.FREE_LAWYER_ACQUISITION.includes(currentPr);
-  return cardDef.cost + (atThreshold ? 0 : SURCHARGE);
+  return cardDef.cost + (prWaivesSurcharge(currentPr) ? 0 : SURCHARGE);
 }
